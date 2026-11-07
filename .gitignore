@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+test-data/
+user-data/
+dist/

@@ -1,0 +1,43 @@
+name: Test and publish Kareem AI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kareem-ai-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install desktop dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test without real keys or microphone capture
+        run: python -m unittest discover -s tests -v
+      - name: Build curated update package
+        run: python build_release.py
+      - name: Publish only a new version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $manifest = Get-Content bundle.json -Raw | ConvertFrom-Json
+          $tag = "v$($manifest.version)"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "This version is already published; bump both version fields for the next update."
+            exit 0
+          }
+          gh release create $tag "dist/Kareem-AI-$tag.zip" "dist/Kareem-AI-$tag.zip.sha256" --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Kareem AI $tag" --notes-file RELEASE-NOTES.md --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
