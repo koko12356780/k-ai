@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import httpx
+from .characters import character_for, character_prompt
 
 ENDPOINTS = {
     "Gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -83,10 +84,12 @@ def check_status(response: httpx.Response, name: str):
 
 
 class Engine:
-    def __init__(self, providers: dict[str, Provider], transport=None):
+    def __init__(self, providers: dict[str, Provider], transport=None, character=None):
         self.providers = providers
         self.transport = transport
         self.usage = {}
+        self.character = character_for(character)
+        self.system_prompt = SYSTEM + "\n\n" + character_prompt(self.character.selection)
 
     async def complete(self, name, messages, token: Callable[[str], None] = lambda _: None):
         p = self.providers[name]
@@ -129,7 +132,8 @@ class Engine:
         return result
 
     async def run(self, history, mode, log=lambda _: None, token=lambda _: None):
-        messages = [{"role": "system", "content": SYSTEM}] + history
+        messages = [{"role": "system", "content": self.system_prompt}] + history
+        log(f"Character: {self.character.name} · {self.character.title}")
         if mode != "Merge":
             log(f"Sending conversation to {mode} · {self.providers[mode].model}")
             text = await self.complete(mode, messages, token)
@@ -155,7 +159,7 @@ class Engine:
             token(text)
             return Answer(text, drafts, self.usage, True)
         log("Gemini is combining both drafts (request 3 of 3).")
-        synthesis = [{"role": "system", "content": SYSTEM + "\n\n" + MERGE_SYSTEM}] + history + [
+        synthesis = [{"role": "system", "content": self.system_prompt + "\n\n" + MERGE_SYSTEM}] + history + [
             {"role": "user", "content": "REFERENCE DRAFTS ONLY — answer my actual request above:\n" +
              json.dumps(drafts, ensure_ascii=False)}]
         try:

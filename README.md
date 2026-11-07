@@ -28,17 +28,38 @@ Click **Voice**, choose your microphone, then **Record**. Recording starts only 
 
 Recordings stay in memory and are discarded when Voice closes. They are capped at 60 seconds and 12 MB. Groq's speech-to-text quota and data policies apply. Speech input uses `whisper-large-v3-turbo` by default; Settings → Voice also offers `whisper-large-v3`.
 
-Click **Read aloud** for the latest reply or enable automatic spoken replies in **Settings → Voice**. Choose a **Groq** voice for cloud-generated speech, independent of Windows voices. English choices: Troy, Autumn, Diana, Hannah, Austin, Daniel. Arabic Saudi choices: Abdullah, Fahad, Sultan, Lulwa, Noura, Aisha. **Try this voice** previews the selection; Save keeps it. Voice mode has the same voice picker and Save voice controls.
+Click **Read aloud** for the latest reply or enable automatic spoken replies in **Settings → Voice**. Choose a character for cloud-generated speech and a matching conversational personality. English choices: Troy, Autumn, Diana, Hannah, Austin, Daniel. Arabic Saudi choices: Abdullah, Fahad, Sultan, Lulwa, Noura, Aisha. **Try this voice** plays an in-character introduction; Save keeps the selection. Voice mode has the same character picker and Save character control.
 
 Cloud voices use your saved Groq key and require Groq model access and quota. The first use each session asks for consent to send spoken text to Groq, including previews and automatic readout if enabled. The app does not enable paid billing or bypass quotas; accounts with paid billing may be charged. Check your provider dashboard for actual access, quota, and pricing. Requests stop on errors without automatic retries or an automatic Windows voice fallback. No model terms are automatically accepted on your behalf.
 
 If Groq reports that model terms must be accepted, use **Settings → Voice → Groq voice setup**. This opens the selected model's official Groq playground. Review the terms and decide whether to accept them in your own account (the organization administrator may be needed), then retry **Try this voice**. English and Arabic models can require separate acceptance. The app does not make that decision for you.
 
-Groq documents a 200-character request limit. Each readout is limited to five requests and roughly 1,000 characters; longer replies are shortened for speech and labelled in Activity, while the full chat reply stays visible. **Mute** cancels pending generation and stops playback. Already accepted requests may still count toward quota. Generated WAV audio remains in memory, with a 12 MB size limit, and is discarded when stopped or closed. Cloud audio plays directly as PCM without media codec scanning. Speed and tone adjustment apply only to Windows voices; cloud voices use their generated cadence.
+Groq documents a 200-character request limit. Each readout is limited to five requests and roughly 1,000 characters; longer replies are shortened for speech and labelled in Activity, while the full chat reply stays visible. **Mute** cancels pending generation and stops playback. Already accepted requests may still count toward quota. Generated WAV audio remains in memory, with a 12 MB size limit, and is discarded when stopped or closed. Cloud audio plays directly as PCM without media codec scanning, using the selected voice's generated cadence.
 
-**Windows** voice choices remain optional for local, offline output without a speech API call. The app discovers all installed Windows voice languages. Add more in Windows speech/language settings and reload. Microphone/speaker support depends on Windows devices and permissions. Automated tests simulate recording and cloud responses; real Groq speech still needs a check with your account.
+Version 0.3.0 removes Windows speech voices from the app. A previously saved Windows voice migrates to Troy; model settings, themes, and chat history are preserved. Groq cloud access and speech quota are required for spoken output. Microphone/speaker support depends on your devices and permissions.
 
 Version 0.2.4 handles Groq's unknown-length streaming WAV headers using the actual received audio bytes, while retaining size, format, truncation, and duration checks. A real Austin response has been verified through generation, decoding, and muted native playback. Account access/quota still determines whether a particular request can be fulfilled.
+
+## Characters
+
+Choose a character in the chat header, **Settings → Voice**, or Voice mode. One selection controls both the AI's conversational personality and its cloud voice. Characters are fictional assistant personas created for this app. They influence all chat modes, including both drafts and the final reply in Merge. Changing the character keeps the conversation and affects future replies. Character style adapts to the task; existing file, execution, and browser approvals still apply.
+
+| Character | Personality |
+| --- | --- |
+| Troy · The Captain | Confident, upbeat, clear plans |
+| Autumn · The Creative | Warm, imaginative, thoughtful ideas |
+| Diana · The Strategist | Precise, concise, dry wit |
+| Hannah · The Spark | Playful, curious, energetic |
+| Austin · The Builder | Relaxed, hands-on, practical fixes |
+| Daniel · The Scholar | Calm, analytical, patient explanations |
+| Abdullah · The Mentor | Steady, encouraging, patient |
+| Fahad · The Fixer | Direct, resourceful, diagnostic |
+| Sultan · The Storyteller | Expressive, engaging, memorable examples |
+| Lulwa · The Dreamer | Artistic, gentle, unusual possibilities |
+| Noura · The Guide | Supportive, organized, clear steps |
+| Aisha · The Explorer | Adventurous, curious, connections between ideas |
+
+Arabic characters use conversational Arabic by default and honor explicit requests for another language. Character behavior is guided by prompts and still depends on the selected chat model; it does not give the model new abilities or guarantee identical wording.
 
 ## Themes
 

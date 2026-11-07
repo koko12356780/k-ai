@@ -12,15 +12,7 @@ import httpx
 from .core import ProviderError, check_status
 from .voice import MAX_AUDIO_BYTES, speech_text
 
-ENGLISH_MODEL = "canopylabs/orpheus-v1-english"
-ARABIC_MODEL = "canopylabs/orpheus-arabic-saudi"
-CLOUD_VOICES = tuple(
-    (f"Groq · {name.title()} · {language}", f"groq|{model}|{name}")
-    for model, language, names in (
-        (ENGLISH_MODEL, "English", ("troy", "autumn", "diana", "hannah", "austin", "daniel")),
-        (ARABIC_MODEL, "Arabic Saudi", ("abdullah", "fahad", "sultan", "lulwa", "noura", "aisha")))
-    for name in names)
-DEFAULT_CLOUD_VOICE = CLOUD_VOICES[0][1]
+from .voice_catalog import ENGLISH_MODEL, ARABIC_MODEL, CLOUD_VOICES, DEFAULT_CLOUD_VOICE
 
 
 def is_cloud_voice(value):
@@ -211,5 +203,5 @@ async def synthesize(text, key, selection, progress=lambda _: None, transport=No
                     total += len(output)
                     clips.append(bytes(output))
         except httpx.HTTPError:
-            raise ProviderError("Groq cloud voice connection failed. No automatic retry or Windows fallback was used.") from None
+            raise ProviderError("Groq cloud voice connection failed. No automatic retry was sent.") from None
     return CloudAudio(combine_wav(clips), len(chunks), sum(map(len, chunks)), truncated)

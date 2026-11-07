@@ -13,17 +13,17 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea,
-    QSizePolicy, QSplitter, QTextBrowser, QVBoxLayout, QWidget, QTabWidget, QSlider,
+    QSizePolicy, QSplitter, QTextBrowser, QVBoxLayout, QWidget, QTabWidget,
 )
 
 from .core import Answer, Engine, Provider, ProviderError, cancellable, discover
 from .storage import Store, get_key, new_chat, set_key
 from .tools import execute, prepare, proposals
 from .themes import NAMES, stylesheet
-from .voice import speech_text, installed_voices, voice_id
 from .voice_ui import VoiceDialog
 from .update_ui import UpdatePanel
-from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, synthesize, pcm_audio, voice_setup_url
+from .cloud_voice import DEFAULT_CLOUD_VOICE, synthesize, pcm_audio, voice_setup_url
+from .characters import CHARACTERS, character_for
 
 
 STYLE = '''
@@ -173,7 +173,7 @@ class Settings(QDialog):
         voice_title.setObjectName("headline")
         voice_layout.addWidget(voice_title)
         voice_note = QLabel("Cloud voices use Groq Orpheus: 6 English and 6 Arabic Saudi voices.\n"
-                            "Speaking sends text to Groq and uses your account quota. Windows voices are optional.\n"
+                            "Each voice is its own character, shaping the AI's chat style and spoken replies.\n"
                             "Long readouts are limited to roughly 1,000 characters / 5 requests to protect quota.")
         voice_note.setWordWrap(True)
         voice_layout.addWidget(voice_note)
@@ -185,40 +185,24 @@ class Settings(QDialog):
         self.stt_model.addItems(["whisper-large-v3-turbo", "whisper-large-v3"])
         self.stt_model.setCurrentText(parent.config.get("stt_model", "whisper-large-v3-turbo"))
         voice_layout.addWidget(self.stt_model)
-        voice_layout.addWidget(QLabel("Speech speed · slower ← → faster (Windows voices only)"))
-        self.rate = QSlider(Qt.Orientation.Horizontal)
-        self.rate.setRange(-50, 50)
-        self.rate.setValue(int(float(parent.config.get("speech_rate", 0)) * 100))
-        voice_layout.addWidget(self.rate)
-        voice_layout.addWidget(QLabel("Voice tone · deeper ← → brighter (Windows voices only)"))
-        self.pitch = QSlider(Qt.Orientation.Horizontal)
-        self.pitch.setRange(-50, 50)
-        self.pitch.setValue(int(float(parent.config.get("speech_pitch", 0)) * 100))
-        voice_layout.addWidget(self.pitch)
+        voice_layout.addWidget(QLabel("Choose your character"))
         self.voice_choice = QComboBox()
-        for label, selection in CLOUD_VOICES:
-            self.voice_choice.addItem(label, selection)
-        self.voice_choice.addItem("Windows · Default voice", "")
-        self.voice_choice.setCurrentIndex(0)
-        self.saved_voice = parent.config.get("speech_voice", DEFAULT_CLOUD_VOICE)
-        if self.saved_voice:
-            index = self.voice_choice.findData(self.saved_voice)
-            if index < 0:
-                self.voice_choice.addItem(self.saved_voice, self.saved_voice)
-                index = self.voice_choice.count() - 1
-            self.voice_choice.setCurrentIndex(index)
-        else:
-            self.voice_choice.setCurrentIndex(self.voice_choice.findData(""))
+        for character in CHARACTERS:
+            self.voice_choice.addItem(character.name + " · " + character.title, character.selection)
+        self.voice_choice.setCurrentIndex(self.voice_choice.findData(
+            character_for(parent.config.get("speech_voice")).selection))
         voice_layout.addWidget(self.voice_choice)
-        voice_layout.addWidget(button("Reload voice list", self.load_voices))
-        self.voice_count = QLabel("12 Groq cloud voices available to select. API access depends on your Groq account.")
+        self.character_details = QLabel()
+        self.character_details.setWordWrap(True)
+        voice_layout.addWidget(self.character_details)
+        self.voice_count = QLabel("12 cloud characters. Speech uses your Groq key and quota.")
         self.voice_count.setWordWrap(True)
         voice_layout.addWidget(self.voice_count)
         self.setup_voice = button("Groq voice setup ↗", self.open_voice_setup)
         voice_layout.addWidget(self.setup_voice)
         voice_layout.addWidget(button("Try this voice", lambda: parent.say(
-            "Hey Kareem! I'm ready to help. How does this voice sound?",
-            self.voice_choice.currentData() or "", self.rate.value() / 100, self.pitch.value() / 100)))
+            character_for(self.voice_choice.currentData()).preview,
+            self.voice_choice.currentData())))
         voice_layout.addWidget(button("Stop speaking", parent.stop_speaking))
         more = QLabel("Choose a Groq voice above for cloud speech. Select an English or Arabic voice to match your text.\n"
                       "Groq quota, model access, and account billing apply; the app does not enable paid billing.")
@@ -227,7 +211,6 @@ class Settings(QDialog):
         voice_layout.addStretch()
         self.updates = UpdatePanel(parent, Worker)
         self.tabs.addTab(self.updates, "Updates")
-        self.tabs.currentChanged.connect(lambda index: self.load_voices() if index == 2 else None)
         self.voice_choice.currentIndexChanged.connect(lambda _: self.update_voice_controls())
         self.update_voice_controls()
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -235,35 +218,13 @@ class Settings(QDialog):
         self.buttons.rejected.connect(self.reject)
         outer.addWidget(self.buttons)
 
-    def load_voices(self):
-        current = self.voice_choice.currentData()
-        self.voice_choice.clear()
-        for label, selection in CLOUD_VOICES:
-            self.voice_choice.addItem(label, selection)
-        self.voice_choice.addItem("Windows · Default voice", "")
-        voices = self.owner.voice_options()
-        for voice in voices:
-            self.voice_choice.addItem("Windows · " + voice.name() + " · " + voice.locale().name(), voice_id(voice))
-        selected = self.voice_choice.findData(current)
-        if selected < 0 and current:
-            selected = next((i for i in range(self.voice_choice.count())
-                             if self.voice_choice.itemData(i).endswith("|" + current)), -1)
-        if selected < 0 and current:
-            self.voice_choice.addItem("Unavailable saved voice · " + current, current)
-            selected = self.voice_choice.count() - 1
-        self.voice_choice.setCurrentIndex(max(0, selected))
-        self.voice_count.setText(f"12 cloud voices + {len(voices)} installed Windows voices. Cloud access uses your Groq key.")
-
     def update_voice_controls(self):
-        local = not is_cloud_voice(self.voice_choice.currentData())
-        self.pitch.setEnabled(local)
-        self.rate.setEnabled(local)
-        self.setup_voice.setEnabled(not local)
+        character = character_for(self.voice_choice.currentData())
+        self.character_details.setText(character.name + " · " + character.title + "\n" + character.summary)
 
     def open_voice_setup(self):
         selection = self.voice_choice.currentData()
-        if is_cloud_voice(selection):
-            self.owner.approve_link(voice_setup_url(selection))
+        self.owner.approve_link(voice_setup_url(character_for(selection).selection))
 
     def refresh(self, name):
         if not self.keys[name].text().strip():
@@ -321,10 +282,10 @@ class Settings(QDialog):
         self.owner.keys = values
         self.owner.config = {**self.owner.config, **{name: self.models[name].currentText().strip() for name in values},
             "theme": self.theme.currentText(), "read_replies": self.read_replies.isChecked(),
-            "speech_rate": self.rate.value() / 100, "speech_voice": self.voice_choice.currentData() or "",
-            "speech_pitch": self.pitch.value() / 100,
+            "speech_voice": character_for(self.voice_choice.currentData()).selection,
             "stt_model": self.stt_model.currentText()}
         self.owner.store.save_config(self.owner.config)
+        self.owner.select_character(self.owner.config["speech_voice"])
         self.owner.apply_theme(self.owner.config["theme"])
         return True
 
@@ -377,7 +338,11 @@ class Window(QMainWindow):
         super().__init__()
         self.store = store or Store()
         self.config = self.store.config()
-        self.speaker = None
+        legacy_voice = self.config.get("speech_voice")
+        if "speech_voice" in self.config and legacy_voice != character_for(legacy_voice).selection:
+            self.config["speech_voice"] = DEFAULT_CLOUD_VOICE
+            self.store.save_config(self.config)
+        self.pending_character = character_for(self.config.get("speech_voice"))
         self.speech_jobs = []
         self.speech_generation = 0
         self.cloud_speech_consent = False
@@ -439,8 +404,21 @@ class Window(QMainWindow):
         header.addWidget(heading, 1)
         self.mode = QComboBox()
         self.mode.addItems(["Merge", "Gemini", "Groq"])
+        self.character_choice = QComboBox()
+        self.character_choice.setAccessibleName("Active character")
+        for character in CHARACTERS:
+            self.character_choice.addItem(character.name + " · " + character.title, character.selection)
+        self.character_choice.setCurrentIndex(self.character_choice.findData(
+            character_for(self.config.get("speech_voice")).selection))
+        header.addWidget(self.character_choice)
         header.addWidget(self.mode)
         main.addLayout(header)
+        self.character_badge = QLabel(character_for(self.config.get("speech_voice")).summary)
+        self.character_badge.setObjectName("badge")
+        self.character_badge.setWordWrap(True)
+        main.addWidget(self.character_badge)
+        self.character_choice.currentIndexChanged.connect(lambda _: self.select_character(
+            self.character_choice.currentData()))
         notice = QLabel("Merge: two independent drafts → one combined answer · up to 3 API requests")
         notice.setObjectName("muted")
         notice.setWordWrap(True)
@@ -558,7 +536,7 @@ class Window(QMainWindow):
 
     def set_busy(self, value):
         for control in [self.send_button, self.new_button, self.settings_button, self.folder_button,
-                        self.mode, self.chat_list, self.export_button, self.voice_button, self.speak_button, *self.action_buttons]:
+                        self.mode, self.character_choice, self.chat_list, self.export_button, self.voice_button, self.speak_button, *self.action_buttons]:
             control.setEnabled(not value)
         self.stop_button.setEnabled(value)
 
@@ -569,22 +547,15 @@ class Window(QMainWindow):
     def apply_theme(self, name):
         QApplication.instance().setStyleSheet(stylesheet(STYLE, name))
 
-    def ensure_speaker(self, silent=False):
-        if self.speaker is None:
-            from PySide6.QtTextToSpeech import QTextToSpeech
-            engines = [name for name in QTextToSpeech.availableEngines() if name != "mock"]
-            if not engines:
-                if not silent:
-                    QMessageBox.information(self, "Windows voices unavailable", "No speech engine was found. Install a Windows voice in Windows language settings.")
-                return None
-            engine = "winrt" if "winrt" in engines else ("sapi" if "sapi" in engines else engines[0])
-            self.speaker = QTextToSpeech(engine, self)
-            self.default_voice = self.speaker.voice()
-        return self.speaker
-
-    def voice_options(self):
-        speaker = self.ensure_speaker(silent=True)
-        return installed_voices(speaker) if speaker is not None else []
+    def select_character(self, selection):
+        character = character_for(selection)
+        self.stop_speaking()
+        self.config["speech_voice"] = character.selection
+        self.store.save_config(self.config)
+        self.character_choice.blockSignals(True)
+        self.character_choice.setCurrentIndex(self.character_choice.findData(character.selection))
+        self.character_choice.blockSignals(False)
+        self.character_badge.setText(character.summary)
 
     def stop_speaking(self):
         self.speech_generation += 1
@@ -599,8 +570,6 @@ class Window(QMainWindow):
             self.audio_buffer.close()
             self.audio_buffer.deleteLater()
             self.audio_buffer = None
-        if self.speaker is not None:
-            self.speaker.stop()
 
     def speech_active(self):
         return any(worker.isRunning() for worker in self.speech_jobs)
@@ -680,29 +649,13 @@ class Window(QMainWindow):
         if self.audio_player is None:
             return
         if self.audio_player.error() != QtAudio.Error.NoError:
-            self.status.setText("Cloud speech playback failed. Check your output device. No Windows fallback was used.")
+            self.status.setText("Cloud speech playback failed. Check your output device.")
         elif self.audio_player.state() == QtAudio.State.IdleState:
             self.status.setText("Ready · Cloud speech finished")
 
-    def say(self, text, voice_name=None, rate=None, pitch=None):
-        voice_name = self.config.get("speech_voice", DEFAULT_CLOUD_VOICE) if voice_name is None else voice_name
-        rate = float(self.config.get("speech_rate", 0)) if rate is None else rate
-        if is_cloud_voice(voice_name):
-            self.cloud_say(text, voice_name, rate)
-            return
-        self.stop_speaking()
-        speaker = self.ensure_speaker()
-        if speaker is None:
-            return
-        speaker.stop()
-        voices = self.voice_options()
-        voice = next((v for v in voices if voice_id(v) == voice_name or v.name() == voice_name), None)
-        voice = voice or self.default_voice
-        speaker.setLocale(voice.locale())
-        speaker.setVoice(voice)
-        speaker.setRate(float(self.config.get("speech_rate", 0)) if rate is None else rate)
-        speaker.setPitch(float(self.config.get("speech_pitch", 0)) if pitch is None else pitch)
-        speaker.say(speech_text(text))
+    def say(self, text, voice_name=None):
+        selection = character_for(self.config.get("speech_voice") if voice_name is None else voice_name).selection
+        self.cloud_say(text, selection, 0)
 
     def read_latest(self):
         message = next((m for m in reversed(self.chat["messages"]) if m["role"] == "assistant"), None)
@@ -762,10 +715,12 @@ class Window(QMainWindow):
         self.composer.clear()
         self.render()
         self.partial = ""
-        self.partial_card = MessageCard("WORKING · " + mode.upper(), "Thinking…", self)
+        self.partial_card = MessageCard("WORKING · " + character_for(self.config.get("speech_voice")).name.upper(), "Thinking…", self)
         self.messages.addWidget(self.partial_card)
         history = [{"role": m["role"], "content": m["content"]} for m in self.chat["messages"]]
-        engine = Engine({n: Provider(n, self.keys[n], self.config[n]) for n in names})
+        self.pending_character = character_for(self.config.get("speech_voice"))
+        engine = Engine({n: Provider(n, self.keys[n], self.config[n]) for n in names},
+                        character=self.pending_character.selection)
         self.worker = Worker(lambda worker: engine.run(history, mode, worker.event.emit, worker.token.emit))
         self.worker.event.connect(self.log)
         self.worker.token.connect(self.receive_token)
@@ -783,9 +738,10 @@ class Window(QMainWindow):
             self.partial_card.body.setPlainText(self.partial)
 
     def answer_ready(self, answer: Answer, mode):
-        label = mode.upper() + (" · SINGLE DRAFT / MERGE UNAVAILABLE" if answer.degraded else "")
-        self.chat["messages"].append({"role": "assistant", "content": answer.text, "label": label})
-        self.chat.setdefault("runs", []).append({"mode": mode, "drafts": answer.drafts,
+        label = self.pending_character.name.upper() + " · " + mode.upper() + (" · SINGLE DRAFT / MERGE UNAVAILABLE" if answer.degraded else "")
+        self.chat["messages"].append({"role": "assistant", "content": answer.text, "label": label,
+                                       "character": self.pending_character.selection})
+        self.chat.setdefault("runs", []).append({"mode": mode, "character": self.pending_character.selection, "drafts": answer.drafts,
                                                  "usage": answer.usage, "degraded": answer.degraded})
         self.store.save_chat(self.chat)
         self.partial_card = None
@@ -797,7 +753,7 @@ class Window(QMainWindow):
                                     "Token totals were not returned by the streaming API; no estimate invented."))
         self.status.setText("Ready · " + label)
         if self.config.get("read_replies", False):
-            self.say(answer.text)
+            self.say(answer.text, self.pending_character.selection)
 
     def failed(self, message):
         self.log(message)

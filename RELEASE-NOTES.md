@@ -1,4 +1,14 @@
-# Kareem AI 0.2.4
+# Kareem AI 0.3.0
+
+- Removed Windows voice choices, Windows speech engine calls, local-voice discovery, and local-only speed/tone controls. All spoken replies now use Groq cloud voices.
+- Added twelve fictional characters, one for each cloud voice. Each has a distinct description, conversational style, and in-character voice preview.
+- Added a character picker in the chat header, linked to Settings → Voice and Voice mode.
+- The selected character shapes Gemini drafts, Groq drafts, and the final Merge reply, as well as single-provider chat. Arabic characters default to Arabic while honoring explicit language requests.
+- Assistant messages and contribution records keep the character used for that reply. Switching characters preserves conversation history and changes the style of subsequent replies.
+- Old Windows voice selections migrate to Troy while preserving model choices, other preferences, and conversations. Existing valid cloud voice selections keep their matching character.
+- Character style never changes tool permission gates, honesty, or accuracy requirements.
+
+## Previous release: 0.2.4
 
 - Fixed real Groq speech responses being rejected as unsupported audio.
 - Groq returns streaming WAV headers with `0xffffffff` for RIFF/data sizes. The reader now resolves those markers from the bounded bytes received, instead of interpreting them as a recording billions of frames long.

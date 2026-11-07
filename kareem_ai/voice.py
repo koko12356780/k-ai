@@ -11,28 +11,6 @@ from .core import ProviderError, check_status
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
 
 
-def installed_voices(speaker):
-    """Qt filters voices by locale; enumerate all locales and restore selection."""
-    original_locale, original_voice = speaker.locale(), speaker.voice()
-    voices, seen = [], set()
-    try:
-        for locale in speaker.availableLocales():
-            speaker.setLocale(locale)
-            for voice in speaker.availableVoices():
-                key = (voice.name(), voice.locale().name())
-                if key not in seen:
-                    seen.add(key)
-                    voices.append(voice)
-    finally:
-        speaker.setLocale(original_locale)
-        speaker.setVoice(original_voice)
-    return sorted(voices, key=lambda v: (v.locale().name(), v.name()))
-
-
-def voice_id(voice):
-    return voice.locale().name() + "|" + voice.name()
-
-
 def wav_audio(pcm: bytes, sample_rate: int, channels: int) -> bytes:
     if not pcm or len(pcm) > MAX_AUDIO_BYTES or sample_rate <= 0 or not 1 <= channels <= 8:
         raise ValueError("No usable recording, or audio exceeded the recording limit.")

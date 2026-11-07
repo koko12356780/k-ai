@@ -72,7 +72,7 @@ class UITests(unittest.TestCase):
                 "You can switch models, review their contributions, and approve proposed file changes.")
             return httpx.Response(200, text="data: " + json.dumps({"choices": [{"delta": {"content": text}}]}) + "\n\ndata: [DONE]\n\n")
         transport = httpx.MockTransport(handler)
-        with patch("kareem_ai.app.Engine", side_effect=lambda providers: Engine(providers, transport)), \
+        with patch("kareem_ai.app.Engine", side_effect=lambda providers, **kwargs: Engine(providers, transport, **kwargs)), \
              patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes):
             self.window.composer.setPlainText("Show me how the two AIs work together. (UI test)")
             self.window.send()
@@ -179,7 +179,10 @@ class UITests(unittest.TestCase):
         updates.checked(Release("0.1.0", "older", "", "", 1))
         updates.finished()
         self.assertFalse(updates.install.isEnabled())
-        updates.checked(Release("0.3.0", "new version notes", "", "", 1))
+        from kareem_ai import __version__
+        major, minor, patch_version = map(int, __version__.split("."))
+        newer = f"{major}.{minor}.{patch_version + 1}"
+        updates.checked(Release(newer, "new version notes", "", "", 1))
         updates.finished()
         self.assertTrue(updates.install.isEnabled())
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No), \
@@ -189,53 +192,59 @@ class UITests(unittest.TestCase):
         self.assertFalse(updates.running())
         dialog.reject()
 
-    def test_voice_picker_preview_is_local_and_choice_saves(self):
-        from unittest.mock import Mock
-        from PySide6.QtCore import QLocale
-        voice = Mock()
-        voice.name.return_value = "Test voice"
-        voice.locale.return_value = QLocale("en_US")
-        with patch.object(self.window, "voice_options", return_value=[voice]), \
-             patch.object(self.window, "say") as say, \
+    def test_character_picker_preview_and_save_sync_with_chat_header(self):
+        from kareem_ai.characters import CHARACTERS
+        character = next(c for c in CHARACTERS if c.name == "Austin")
+        with patch.object(self.window, "say") as say, \
              patch("kareem_ai.voice_ui.QMediaDevices.audioInputs", return_value=[]):
             dialog = VoiceDialog(self.window, Worker)
-            dialog.reply_voice.setCurrentIndex(dialog.reply_voice.findData("en_US|Test voice"))
+            self.assertEqual(dialog.reply_voice.count(), 12)
+            dialog.reply_voice.setCurrentIndex(dialog.reply_voice.findData(character.selection))
             dialog.preview_voice.click()
-            self.assertEqual(say.call_args.args[1], "en_US|Test voice")
+            self.assertEqual(say.call_args.args, (character.preview, character.selection))
             self.assertNotIn("speech_voice", self.window.store.config())
             dialog.save_voice()
-            self.assertEqual(self.window.store.config()["speech_voice"], "en_US|Test voice")
+            self.assertEqual(self.window.store.config()["speech_voice"], character.selection)
+            self.assertEqual(self.window.character_choice.currentData(), character.selection)
+            self.assertIn(character.summary, self.window.character_badge.text())
             dialog.reject()
 
-    def test_settings_auto_load_voices_and_preview_without_saving(self):
-        from unittest.mock import Mock
-        from PySide6.QtCore import QLocale
-        voice = Mock()
-        voice.name.return_value = "Test Arabic voice"
-        voice.locale.return_value = QLocale("ar_SA")
-        with patch.object(self.window, "voice_options", return_value=[voice]), \
-             patch.object(self.window, "say") as say:
+    def test_settings_character_description_and_preview_without_saving(self):
+        from kareem_ai.characters import CHARACTERS
+        character = next(c for c in CHARACTERS if c.name == "Noura")
+        with patch.object(self.window, "say") as say:
             dialog = Settings(self.window)
             dialog.tabs.setCurrentIndex(2)
-            self.assertEqual(dialog.voice_choice.count(), 14)
-            dialog.voice_choice.setCurrentIndex(dialog.voice_choice.findData("ar_SA|Test Arabic voice"))
-            dialog.rate.setValue(20)
-            dialog.pitch.setValue(-15)
+            self.assertEqual(dialog.voice_choice.count(), 12)
+            self.assertFalse(any("Windows" in dialog.voice_choice.itemText(i) for i in range(12)))
+            dialog.voice_choice.setCurrentIndex(dialog.voice_choice.findData(character.selection))
+            self.assertIn(character.summary, dialog.character_details.text())
             sample = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Try this voice")
             sample.click()
-            self.assertEqual(say.call_args.args[1:], ("ar_SA|Test Arabic voice", .2, -.15))
+            self.assertEqual(say.call_args.args, (character.preview, character.selection))
             self.assertNotIn("speech_voice", self.window.store.config())
             dialog.reject()
+
+    def test_legacy_windows_choice_migrates_preserving_models_and_history(self):
+        from kareem_ai.cloud_voice import DEFAULT_CLOUD_VOICE
+        self.window.store.save_config({"speech_voice": "en_US|Microsoft David", "Gemini": "saved-model", "theme": "Mint"})
+        other = Window(self.window.store)
+        self.assertEqual(other.config["speech_voice"], DEFAULT_CLOUD_VOICE)
+        self.assertEqual(other.config["Gemini"], "saved-model")
+        self.assertEqual(other.config["theme"], "Mint")
+        self.assertEqual(other.character_choice.count(), 12)
+        self.assertFalse(hasattr(other, "ensure_speaker"))
+        other.close()
+        other.deleteLater()
 
     def test_cloud_voice_denied_never_uses_api_or_windows_speech(self):
         from kareem_ai.cloud_voice import DEFAULT_CLOUD_VOICE
         self.window.keys["Groq"] = "fake-key"
         with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No), \
-             patch("kareem_ai.app.synthesize") as synthesize, \
-             patch.object(self.window, "ensure_speaker") as windows:
+             patch("kareem_ai.app.synthesize") as synthesize:
             self.window.say("Hello", DEFAULT_CLOUD_VOICE)
             synthesize.assert_not_called()
-            windows.assert_not_called()
+            self.assertFalse(hasattr(self.window, "ensure_speaker"))
         self.assertFalse(self.window.speech_active())
 
     def test_cloud_voice_generation_and_mute_cancellation(self):

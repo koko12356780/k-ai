@@ -7,8 +7,9 @@ from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox,
                               QPlainTextEdit, QPushButton, QVBoxLayout)
 
-from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio, voice_id
-from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, voice_setup_url
+from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio
+from .cloud_voice import voice_setup_url
+from .characters import CHARACTERS, character_for
 
 
 class VoiceDialog(QDialog):
@@ -34,37 +35,31 @@ class VoiceDialog(QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
         voice_row = QHBoxLayout()
-        voice_row.addWidget(QLabel("Reply voice"))
+        voice_row.addWidget(QLabel("Character"))
         self.reply_voice = QComboBox()
-        for label, selection in CLOUD_VOICES:
-            self.reply_voice.addItem(label, selection)
-        self.reply_voice.addItem("Windows · Default voice", "")
-        for voice in owner.voice_options():
-            self.reply_voice.addItem("Windows · " + voice.name() + " · " + voice.locale().name(), voice_id(voice))
-        saved = owner.config.get("speech_voice", DEFAULT_CLOUD_VOICE)
-        selected = self.reply_voice.findData(saved)
-        if selected < 0:
-            selected = next((i for i in range(self.reply_voice.count())
-                             if self.reply_voice.itemData(i).endswith("|" + saved)), -1)
-        if selected < 0 and saved:
-            self.reply_voice.addItem("Unavailable saved voice · " + saved, saved)
-            selected = self.reply_voice.count() - 1
-        self.reply_voice.setCurrentIndex(max(0, selected))
+        for character in CHARACTERS:
+            self.reply_voice.addItem(character.name + " · " + character.title, character.selection)
+        self.reply_voice.setCurrentIndex(self.reply_voice.findData(
+            character_for(owner.config.get("speech_voice")).selection))
         voice_row.addWidget(self.reply_voice, 1)
         self.preview_voice = QPushButton("Try this voice")
         self.preview_voice.clicked.connect(lambda: owner.say(
-            "Hey Kareem! I'm ready to help. How does this voice sound?", self.reply_voice.currentData() or ""))
+            character_for(self.reply_voice.currentData()).preview, self.reply_voice.currentData()))
         voice_row.addWidget(self.preview_voice)
-        save_voice = QPushButton("Save voice")
+        save_voice = QPushButton("Save character")
         save_voice.clicked.connect(self.save_voice)
         voice_row.addWidget(save_voice)
         layout.addLayout(voice_row)
-        cloud_note = QLabel("Groq voices generate speech in the cloud using your key and quota. Windows voices stay local.")
+        cloud_note = QLabel("Your character shapes chat and speech. Spoken audio uses your Groq key and quota.")
         cloud_note.setWordWrap(True)
         layout.addWidget(cloud_note)
+        self.character_details = QLabel(character_for(self.reply_voice.currentData()).summary)
+        self.character_details.setWordWrap(True)
+        self.reply_voice.currentIndexChanged.connect(lambda _: self.character_details.setText(
+            character_for(self.reply_voice.currentData()).summary))
+        layout.addWidget(self.character_details)
         setup = QPushButton("Groq voice setup ↗ · review model terms in your account")
-        setup.clicked.connect(lambda: owner.approve_link(voice_setup_url(self.reply_voice.currentData()))
-                              if is_cloud_voice(self.reply_voice.currentData()) else None)
+        setup.clicked.connect(lambda: owner.approve_link(voice_setup_url(self.reply_voice.currentData())))
         layout.addWidget(setup)
         self.devices = QMediaDevices.audioInputs()
         self.device = QComboBox()
@@ -110,9 +105,8 @@ class VoiceDialog(QDialog):
         return self.worker is not None and self.worker.isRunning()
 
     def save_voice(self):
-        self.owner.config["speech_voice"] = self.reply_voice.currentData() or ""
-        self.owner.store.save_config(self.owner.config)
-        self.status.setText("Reply voice saved. Use Try this voice to hear it.")
+        self.owner.select_character(self.reply_voice.currentData())
+        self.status.setText("Character saved for chat and speech. Use Try this voice to hear it.")
 
     def start_recording(self):
         if not self.devices or self.running():
