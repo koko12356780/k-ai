@@ -1,4 +1,17 @@
-# Kareem AI 0.2.1
+# Kareem AI 0.2.2
+
+- Added 12 Groq Orpheus cloud voices, independent of Windows' installed voices.
+- English: Troy, Autumn, Diana, Hannah, Austin, and Daniel.
+- Arabic Saudi: Abdullah, Fahad, Sultan, Lulwa, Noura, and Aisha.
+- Both Settings → Voice and Voice mode offer the cloud voice picker, previews, saved choices, and read-aloud support.
+- Cloud speech asks for session consent before sending spoken text to Groq. It uses the saved Groq key and the account's quota/billing; no paid billing is enabled by the app.
+- Cloud speech uses at most five requests per readout, up to 200 characters per request, and shortens long readouts to protect quota. Full answers remain visible in chat.
+- Mute cancels pending speech generation and stops playback. Downloaded WAV audio stays in memory. Failed cloud speech does not silently switch to Windows voices.
+- Cloud audio uses direct PCM playback without scanning media codecs. Speed and tone controls apply only to Windows voices.
+
+Groq's preview speech models require account access and available quota. Free availability is not guaranteed for every account, and paid accounts may incur charges. No live speech API call was made during development; network and audio tests used simulated data. Install/update first, save your Groq key, select a Groq voice, and choose Try this voice to check your account's access.
+
+## Previous release: 0.2.1
 
 - Merge now answers the actual message naturally; it is instructed to avoid narrating draft comparisons unless asked. Model contributions remain inspectable separately.
 - Added a reply-voice picker inside Voice mode, with Try this voice and Save voice controls.

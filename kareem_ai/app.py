@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QThread, Signal, QUrl
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QUrl
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
@@ -23,6 +23,7 @@ from .themes import NAMES, stylesheet
 from .voice import speech_text, installed_voices, voice_id
 from .voice_ui import VoiceDialog
 from .update_ui import UpdatePanel
+from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, synthesize, pcm_audio
 
 
 STYLE = '''
@@ -171,8 +172,9 @@ class Settings(QDialog):
         voice_title = QLabel("Talk it through.")
         voice_title.setObjectName("headline")
         voice_layout.addWidget(voice_title)
-        voice_note = QLabel("Push-to-talk uses Groq speech recognition. You approve recording and upload separately.\n"
-                            "Spoken replies use a Windows voice on this PC, with no extra AI API call.")
+        voice_note = QLabel("Cloud voices use Groq Orpheus: 6 English and 6 Arabic Saudi voices.\n"
+                            "Speaking sends text to Groq and uses your account quota. Windows voices are optional.\n"
+                            "Long readouts are limited to roughly 1,000 characters / 5 requests to protect quota.")
         voice_note.setWordWrap(True)
         voice_layout.addWidget(voice_note)
         self.read_replies = QCheckBox("Read completed replies aloud automatically")
@@ -183,39 +185,49 @@ class Settings(QDialog):
         self.stt_model.addItems(["whisper-large-v3-turbo", "whisper-large-v3"])
         self.stt_model.setCurrentText(parent.config.get("stt_model", "whisper-large-v3-turbo"))
         voice_layout.addWidget(self.stt_model)
-        voice_layout.addWidget(QLabel("Speech speed · slower ← → faster"))
+        voice_layout.addWidget(QLabel("Speech speed · slower ← → faster (Windows voices only)"))
         self.rate = QSlider(Qt.Orientation.Horizontal)
         self.rate.setRange(-50, 50)
         self.rate.setValue(int(float(parent.config.get("speech_rate", 0)) * 100))
         voice_layout.addWidget(self.rate)
-        voice_layout.addWidget(QLabel("Voice tone · deeper ← → brighter"))
+        voice_layout.addWidget(QLabel("Voice tone · deeper ← → brighter (Windows voices only)"))
         self.pitch = QSlider(Qt.Orientation.Horizontal)
         self.pitch.setRange(-50, 50)
         self.pitch.setValue(int(float(parent.config.get("speech_pitch", 0)) * 100))
         voice_layout.addWidget(self.pitch)
         self.voice_choice = QComboBox()
-        self.voice_choice.addItem("Default Windows voice", "")
+        for label, selection in CLOUD_VOICES:
+            self.voice_choice.addItem(label, selection)
+        self.voice_choice.addItem("Windows · Default voice", "")
         self.voice_choice.setCurrentIndex(0)
-        self.saved_voice = parent.config.get("speech_voice", "")
+        self.saved_voice = parent.config.get("speech_voice", DEFAULT_CLOUD_VOICE)
         if self.saved_voice:
-            self.voice_choice.addItem(self.saved_voice, self.saved_voice)
-            self.voice_choice.setCurrentIndex(1)
+            index = self.voice_choice.findData(self.saved_voice)
+            if index < 0:
+                self.voice_choice.addItem(self.saved_voice, self.saved_voice)
+                index = self.voice_choice.count() - 1
+            self.voice_choice.setCurrentIndex(index)
+        else:
+            self.voice_choice.setCurrentIndex(self.voice_choice.findData(""))
         voice_layout.addWidget(self.voice_choice)
-        voice_layout.addWidget(button("Reload installed voices", self.load_voices))
-        self.voice_count = QLabel("Open this tab to load your Windows voices. No cloud API is used for speaking.")
+        voice_layout.addWidget(button("Reload voice list", self.load_voices))
+        self.voice_count = QLabel("12 Groq cloud voices available to select. API access depends on your Groq account.")
         self.voice_count.setWordWrap(True)
         voice_layout.addWidget(self.voice_count)
         voice_layout.addWidget(button("Try this voice", lambda: parent.say(
             "Hey Kareem! I'm ready to help. How does this voice sound?",
             self.voice_choice.currentData() or "", self.rate.value() / 100, self.pitch.value() / 100)))
         voice_layout.addWidget(button("Stop speaking", parent.stop_speaking))
-        more = QLabel("Want more choices? Add voices in Windows speech/language settings, then reload here.")
+        more = QLabel("Choose a Groq voice above for cloud speech. Select an English or Arabic voice to match your text.\n"
+                      "Groq quota, model access, and account billing apply; the app does not enable paid billing.")
         more.setWordWrap(True)
         voice_layout.addWidget(more)
         voice_layout.addStretch()
         self.updates = UpdatePanel(parent, Worker)
         self.tabs.addTab(self.updates, "Updates")
         self.tabs.currentChanged.connect(lambda index: self.load_voices() if index == 2 else None)
+        self.voice_choice.currentIndexChanged.connect(lambda _: self.update_voice_controls())
+        self.update_voice_controls()
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.save)
         self.buttons.rejected.connect(self.reject)
@@ -224,10 +236,12 @@ class Settings(QDialog):
     def load_voices(self):
         current = self.voice_choice.currentData()
         self.voice_choice.clear()
-        self.voice_choice.addItem("Default Windows voice", "")
+        for label, selection in CLOUD_VOICES:
+            self.voice_choice.addItem(label, selection)
+        self.voice_choice.addItem("Windows · Default voice", "")
         voices = self.owner.voice_options()
         for voice in voices:
-            self.voice_choice.addItem(voice.name() + " · " + voice.locale().name(), voice_id(voice))
+            self.voice_choice.addItem("Windows · " + voice.name() + " · " + voice.locale().name(), voice_id(voice))
         selected = self.voice_choice.findData(current)
         if selected < 0 and current:
             selected = next((i for i in range(self.voice_choice.count())
@@ -236,8 +250,12 @@ class Settings(QDialog):
             self.voice_choice.addItem("Unavailable saved voice · " + current, current)
             selected = self.voice_choice.count() - 1
         self.voice_choice.setCurrentIndex(max(0, selected))
-        self.voice_count.setText(f"{len(voices)} installed voice(s) found across your Windows languages." if voices else
-                                "No Windows speech voices available. Add a Windows voice, then reload.")
+        self.voice_count.setText(f"12 cloud voices + {len(voices)} installed Windows voices. Cloud access uses your Groq key.")
+
+    def update_voice_controls(self):
+        local = not is_cloud_voice(self.voice_choice.currentData())
+        self.pitch.setEnabled(local)
+        self.rate.setEnabled(local)
 
     def refresh(self, name):
         if not self.keys[name].text().strip():
@@ -352,6 +370,11 @@ class Window(QMainWindow):
         self.store = store or Store()
         self.config = self.store.config()
         self.speaker = None
+        self.speech_jobs = []
+        self.speech_generation = 0
+        self.cloud_speech_consent = False
+        self.audio_player = None
+        self.audio_buffer = None
         self.apply_theme(self.config.get("theme", "Night"))
         self.keys = {}
         self.key_warning = False
@@ -556,15 +579,114 @@ class Window(QMainWindow):
         return installed_voices(speaker) if speaker is not None else []
 
     def stop_speaking(self):
+        self.speech_generation += 1
+        for worker in self.speech_jobs:
+            if worker.isRunning():
+                worker.cancel.set()
+        if self.audio_player is not None:
+            self.audio_player.stop()
+            self.audio_player.deleteLater()
+            self.audio_player = None
+        if self.audio_buffer is not None:
+            self.audio_buffer.close()
+            self.audio_buffer.deleteLater()
+            self.audio_buffer = None
         if self.speaker is not None:
             self.speaker.stop()
 
+    def speech_active(self):
+        return any(worker.isRunning() for worker in self.speech_jobs)
+
+    def cloud_say(self, text, selection, rate):
+        self.stop_speaking()
+        if not self.keys.get("Groq"):
+            QMessageBox.information(self, "Groq key needed", "Save your Groq API key in Settings → Models & keys before previewing or using cloud voices.")
+            return
+        if not self.cloud_speech_consent:
+            if QMessageBox.question(self, "Allow cloud speech this session?",
+                "Generate spoken replies and voice previews with Groq for this session?\n\n"
+                "This sends the text being spoken to Groq, including automatic readout if enabled. "
+                "Each readout sends up to roughly 1,000 characters using at most 5 API requests. "
+                "Your free quota/model access applies; accounts with paid billing may incur charges. "
+                "The app does not enable billing. Mute cancels requests still in progress.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+                return
+            self.cloud_speech_consent = True
+        generation = self.speech_generation
+        key = self.keys["Groq"]
+        worker = Worker(lambda w: synthesize(text, key, selection, w.event.emit))
+        self.speech_jobs.append(worker)
+        worker.event.connect(self.log)
+        worker.success.connect(lambda result: self.cloud_audio_ready(result, generation, rate))
+        worker.failure.connect(lambda message: self.cloud_voice_failed(message, generation))
+        worker.finished.connect(lambda: self.speech_finished(worker))
+        self.status.setText("Generating Groq cloud voice…")
+        self.log("Approved cloud speech using " + selection.split("|")[-1] + ".")
+        worker.start()
+
+    def speech_finished(self, worker):
+        if worker in self.speech_jobs:
+            self.speech_jobs.remove(worker)
+        worker.deleteLater()
+
+    def cloud_voice_failed(self, message, generation):
+        if generation == self.speech_generation:
+            self.status.setText(message)
+        self.log(message)
+
+    def cloud_audio_ready(self, result, generation, rate):
+        if generation != self.speech_generation:
+            return
+        from PySide6.QtCore import QBuffer, QIODevice
+        from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices, QtAudio
+        try:
+            pcm, sample_rate, channels, width = pcm_audio(result.audio)
+        except ProviderError as exc:
+            self.cloud_voice_failed(str(exc), generation)
+            return
+        fmt = QAudioFormat()
+        fmt.setSampleRate(sample_rate)
+        fmt.setChannelCount(channels)
+        fmt.setSampleFormat({1: QAudioFormat.SampleFormat.UInt8, 2: QAudioFormat.SampleFormat.Int16,
+                             4: QAudioFormat.SampleFormat.Int32}[width])
+        device = QMediaDevices.defaultAudioOutput()
+        if device.isNull() or not device.isFormatSupported(fmt):
+            self.cloud_voice_failed("Your output device cannot play this speech format. Choose another output device in Windows sound settings.", generation)
+            return
+        self.audio_player = QAudioSink(device, fmt, self)
+        self.audio_player.stateChanged.connect(self.audio_playback_state)
+        self.audio_buffer = QBuffer(self)
+        self.audio_buffer.setData(pcm)
+        self.audio_buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+        self.audio_player.start(self.audio_buffer)
+        self.status.setText("Playing Groq cloud voice" + (" · Long reply shortened for quota" if result.truncated else ""))
+        self.log(f"Cloud speech ready: {result.requests} request(s), {result.characters} characters. " +
+                 ("Readout shortened to protect quota." if result.truncated else "Audio kept in memory only."))
+
+    @Slot()
+    def audio_playback_state(self):
+        # A no-argument Qt slot also supports bindings that expose the legacy
+        # QAudio::State signal name alongside QtAudio.State.
+        from PySide6.QtMultimedia import QtAudio
+        if self.audio_player is None:
+            return
+        if self.audio_player.error() != QtAudio.Error.NoError:
+            self.status.setText("Cloud speech playback failed. Check your output device. No Windows fallback was used.")
+        elif self.audio_player.state() == QtAudio.State.IdleState:
+            self.status.setText("Ready · Cloud speech finished")
+
     def say(self, text, voice_name=None, rate=None, pitch=None):
+        voice_name = self.config.get("speech_voice", DEFAULT_CLOUD_VOICE) if voice_name is None else voice_name
+        rate = float(self.config.get("speech_rate", 0)) if rate is None else rate
+        if is_cloud_voice(voice_name):
+            self.cloud_say(text, voice_name, rate)
+            return
+        self.stop_speaking()
         speaker = self.ensure_speaker()
         if speaker is None:
             return
         speaker.stop()
-        voice_name = self.config.get("speech_voice", "") if voice_name is None else voice_name
         voices = self.voice_options()
         voice = next((v for v in voices if voice_id(v) == voice_name or v.name() == voice_name), None)
         voice = voice or self.default_voice
@@ -789,7 +911,11 @@ class Window(QMainWindow):
                 QMessageBox.information(self, "Export failed", "Couldn't write to that location.")
 
     def closeEvent(self, event):
-        if self.busy():
+        if self.speech_active():
+            self.stop_speaking()
+            self.status.setText("Stopping cloud voice… Close again once it finishes.")
+            event.ignore()
+        elif self.busy():
             self.status.setText("Wait for the action to finish, or stop the AI reply before closing.")
             event.ignore()
         else:

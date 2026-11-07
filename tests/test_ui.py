@@ -199,7 +199,7 @@ class UITests(unittest.TestCase):
              patch.object(self.window, "say") as say, \
              patch("kareem_ai.voice_ui.QMediaDevices.audioInputs", return_value=[]):
             dialog = VoiceDialog(self.window, Worker)
-            dialog.reply_voice.setCurrentIndex(1)
+            dialog.reply_voice.setCurrentIndex(dialog.reply_voice.findData("en_US|Test voice"))
             dialog.preview_voice.click()
             self.assertEqual(say.call_args.args[1], "en_US|Test voice")
             self.assertNotIn("speech_voice", self.window.store.config())
@@ -217,8 +217,8 @@ class UITests(unittest.TestCase):
              patch.object(self.window, "say") as say:
             dialog = Settings(self.window)
             dialog.tabs.setCurrentIndex(2)
-            self.assertEqual(dialog.voice_choice.count(), 2)
-            dialog.voice_choice.setCurrentIndex(1)
+            self.assertEqual(dialog.voice_choice.count(), 14)
+            dialog.voice_choice.setCurrentIndex(dialog.voice_choice.findData("ar_SA|Test Arabic voice"))
             dialog.rate.setValue(20)
             dialog.pitch.setValue(-15)
             sample = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Try this voice")
@@ -226,6 +226,61 @@ class UITests(unittest.TestCase):
             self.assertEqual(say.call_args.args[1:], ("ar_SA|Test Arabic voice", .2, -.15))
             self.assertNotIn("speech_voice", self.window.store.config())
             dialog.reject()
+
+    def test_cloud_voice_denied_never_uses_api_or_windows_speech(self):
+        from kareem_ai.cloud_voice import DEFAULT_CLOUD_VOICE
+        self.window.keys["Groq"] = "fake-key"
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No), \
+             patch("kareem_ai.app.synthesize") as synthesize, \
+             patch.object(self.window, "ensure_speaker") as windows:
+            self.window.say("Hello", DEFAULT_CLOUD_VOICE)
+            synthesize.assert_not_called()
+            windows.assert_not_called()
+        self.assertFalse(self.window.speech_active())
+
+    def test_cloud_voice_generation_and_mute_cancellation(self):
+        import asyncio
+        from kareem_ai.cloud_voice import CloudAudio, DEFAULT_CLOUD_VOICE
+        self.window.keys["Groq"] = "fake-key"
+        async def generate(*args):
+            await asyncio.sleep(.05)
+            return CloudAudio(b"simulated audio", 1, 5, False)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), \
+             patch("kareem_ai.app.synthesize", side_effect=generate) as synthesize, \
+             patch.object(self.window, "cloud_audio_ready") as play:
+            self.window.say("Hello", DEFAULT_CLOUD_VOICE)
+            deadline = time.monotonic() + 5
+            while self.window.speech_active() and time.monotonic() < deadline:
+                QTest.qWait(20)
+            QTest.qWait(50)
+            self.assertEqual(synthesize.await_count, 1)
+            play.assert_called_once()
+            play.reset_mock()
+            self.window.say("Hello again", DEFAULT_CLOUD_VOICE)
+            self.window.stop_speaking()
+            deadline = time.monotonic() + 5
+            while self.window.speech_active() and time.monotonic() < deadline:
+                QTest.qWait(20)
+            QTest.qWait(50)
+            play.assert_not_called()
+        self.assertFalse(self.window.speech_active())
+
+    def test_cloud_audio_uses_pcm_memory_buffer_without_media_codecs(self):
+        from unittest.mock import Mock
+        from kareem_ai.cloud_voice import CloudAudio
+        from kareem_ai.voice import wav_audio
+        player = Mock()
+        audio = wav_audio(b"\x00\x00" * 100, 16000, 1)
+        device = Mock()
+        device.isNull.return_value = False
+        device.isFormatSupported.return_value = True
+        with patch("PySide6.QtMultimedia.QAudioSink", return_value=player), \
+             patch("PySide6.QtMultimedia.QMediaDevices.defaultAudioOutput", return_value=device):
+            self.window.cloud_audio_ready(CloudAudio(audio, 1, 5, False), self.window.speech_generation, .2)
+            self.assertEqual(bytes(self.window.audio_buffer.data()), b"\x00\x00" * 100)
+            player.start.assert_called_once_with(self.window.audio_buffer)
+            self.window.stop_speaking()
+            self.assertIsNone(self.window.audio_buffer)
 
 
 if __name__ == "__main__":

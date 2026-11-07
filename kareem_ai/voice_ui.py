@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import QBuffer, QIODevice, QTimer
+from PySide6.QtCore import QBuffer, QIODevice, QTimer, Slot
 from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox,
                               QPlainTextEdit, QPushButton, QVBoxLayout)
 
 from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio, voice_id
+from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE
 
 
 class VoiceDialog(QDialog):
@@ -35,10 +36,12 @@ class VoiceDialog(QDialog):
         voice_row = QHBoxLayout()
         voice_row.addWidget(QLabel("Reply voice"))
         self.reply_voice = QComboBox()
-        self.reply_voice.addItem("Default Windows voice", "")
+        for label, selection in CLOUD_VOICES:
+            self.reply_voice.addItem(label, selection)
+        self.reply_voice.addItem("Windows · Default voice", "")
         for voice in owner.voice_options():
-            self.reply_voice.addItem(voice.name() + " · " + voice.locale().name(), voice_id(voice))
-        saved = owner.config.get("speech_voice", "")
+            self.reply_voice.addItem("Windows · " + voice.name() + " · " + voice.locale().name(), voice_id(voice))
+        saved = owner.config.get("speech_voice", DEFAULT_CLOUD_VOICE)
         selected = self.reply_voice.findData(saved)
         if selected < 0:
             selected = next((i for i in range(self.reply_voice.count())
@@ -56,6 +59,9 @@ class VoiceDialog(QDialog):
         save_voice.clicked.connect(self.save_voice)
         voice_row.addWidget(save_voice)
         layout.addLayout(voice_row)
+        cloud_note = QLabel("Groq voices generate speech in the cloud using your key and quota. Windows voices stay local.")
+        cloud_note.setWordWrap(True)
+        layout.addWidget(cloud_note)
         self.devices = QMediaDevices.audioInputs()
         self.device = QComboBox()
         self.device.addItems([d.description() for d in self.devices])
@@ -146,7 +152,8 @@ class VoiceDialog(QDialog):
         self.timer.start()
         self.owner.log("Microphone recording approved and started. No audio uploaded.")
 
-    def audio_state(self, _):
+    @Slot()
+    def audio_state(self):
         if self.source is not None and self.source.error().value != 0:
             self.stop_recording()
             self.status.setText("Microphone capture failed. Check Windows microphone permissions and your input device.")

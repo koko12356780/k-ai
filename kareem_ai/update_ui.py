@@ -125,6 +125,10 @@ class UpdatePanel(QWidget):
     def restart_app(self):
         if self.running() or not self.staged or self.owner.busy():
             return
+        if self.owner.speech_active():
+            self.owner.stop_speaking()
+            self.status.setText("Stopping cloud speech. Click Restart again when it finishes.")
+            return
         if QMessageBox.question(self, "Restart now?", "Save your settings and restart into the downloaded update?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
