@@ -1,17 +1,53 @@
 import io
 import json
+import struct
 import unittest
 import wave
 
 import httpx
 
 from kareem_ai.cloud_voice import (ARABIC_MODEL, CLOUD_VOICES, DEFAULT_CLOUD_VOICE,
-    cloud_voice, combine_wav, speech_chunks, synthesize, voice_setup_url)
+    cloud_voice, combine_wav, speech_chunks, synthesize, voice_setup_url, bounded_wav)
 from kareem_ai.core import ProviderError
 from kareem_ai.voice import wav_audio
 
 
 class CloudVoiceTests(unittest.IsolatedAsyncioTestCase):
+    def streaming_wav(self, pcm=b"\x00\x00" * 100):
+        original = wav_audio(pcm, 24000, 1)
+        # Groq includes metadata before data; use odd-sized metadata to also test padding.
+        metadata = struct.pack("<4sI", b"LIST", 3) + b"abc\x00"
+        audio = bytearray(original[:36] + metadata + original[36:])
+        struct.pack_into("<I", audio, 4, 0xFFFFFFFF)
+        struct.pack_into("<I", audio, audio.index(b"data") + 4, 0xFFFFFFFF)
+        return bytes(audio)
+
+    def test_streaming_unknown_lengths_use_actual_received_frames(self):
+        normalized = combine_wav([self.streaming_wav(), self.streaming_wav()])
+        with wave.open(io.BytesIO(normalized)) as audio:
+            self.assertEqual(audio.getframerate(), 24000)
+            self.assertEqual(audio.getnframes(), 200)
+            self.assertEqual(len(audio.readframes(200)), 400)
+
+    async def test_actual_groq_streaming_header_shape_through_synthesis(self):
+        audio = self.streaming_wav()
+        result = await synthesize("Hello Kareem!", "fake-key", DEFAULT_CLOUD_VOICE,
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, content=audio)))
+        with wave.open(io.BytesIO(result.audio)) as wav:
+            self.assertEqual(wav.getnframes(), 100)
+        self.assertEqual(result.requests, 1)
+
+    def test_finite_truncation_and_partial_streaming_frame_rejected(self):
+        finite = wav_audio(b"\x00\x00" * 100, 24000, 1)
+        with self.assertRaises(ProviderError):
+            bounded_wav(finite[:-2])
+        with self.assertRaises(ProviderError):
+            bounded_wav(self.streaming_wav()[:-1])
+
+    def test_real_long_streaming_audio_still_rejected(self):
+        with self.assertRaises(ProviderError):
+            combine_wav([self.streaming_wav(bytes(24000 * 2 * 181))])
+
     def test_twelve_voices_with_correct_language_model(self):
         self.assertEqual(len(CLOUD_VOICES), 12)
         self.assertEqual(len({value for _, value in CLOUD_VOICES}), 12)

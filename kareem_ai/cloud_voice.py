@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import re
+import struct
 import wave
 from dataclasses import dataclass
 
@@ -90,11 +91,57 @@ class CloudAudio:
     truncated: bool
 
 
+def bounded_wav(clip):
+    """Resolve streaming RIFF/data length markers using the bounded received bytes.
+
+    Groq returns 0xffffffff for RIFF and data lengths. Ordinary finite lengths
+    remain strict: a truncated download is never treated as streaming audio.
+    """
+    if len(clip) < 12 or len(clip) > MAX_AUDIO_BYTES or clip[:4] != b"RIFF" or clip[8:12] != b"WAVE":
+        raise ProviderError("Groq returned invalid WAV speech audio.")
+    unknown = 0xFFFFFFFF
+    riff_size = struct.unpack_from("<I", clip, 4)[0]
+    limit = len(clip) if riff_size == unknown else riff_size + 8
+    if not 12 <= limit <= len(clip):
+        raise ProviderError("Groq returned incomplete speech audio.")
+    normalized = bytearray(clip[:limit])
+    if riff_size == unknown:
+        struct.pack_into("<I", normalized, 4, limit - 8)
+    offset, frame_bytes = 12, None
+    for _ in range(256):
+        if offset + 8 > limit:
+            break
+        kind, size = struct.unpack_from("<4sI", normalized, offset)
+        start = offset + 8
+        if kind == b"data":
+            if frame_bytes is None:
+                raise ProviderError("Groq returned audio without a usable WAV format header.")
+            actual_size = limit - start if size == unknown else size
+            if actual_size <= 0 or start + actual_size > limit or actual_size % frame_bytes:
+                raise ProviderError("Groq returned incomplete speech audio.")
+            if size == unknown:
+                struct.pack_into("<I", normalized, offset + 4, actual_size)
+            return bytes(normalized)
+        if size == unknown or start + size > limit:
+            raise ProviderError("Groq returned incomplete WAV metadata.")
+        if kind == b"fmt ":
+            if size < 16:
+                raise ProviderError("Groq returned an invalid WAV format header.")
+            encoding, channels, rate, byte_rate, alignment, bits = struct.unpack_from("<HHIIHH", normalized, start)
+            if (encoding != 1 or not 1 <= channels <= 2 or bits not in (8, 16, 24, 32)
+                    or not 8000 <= rate <= 96000 or alignment != channels * (bits // 8)
+                    or byte_rate != rate * alignment):
+                raise ProviderError("Groq returned unsupported speech audio.")
+            frame_bytes = alignment
+        offset = start + size + (size % 2)
+    raise ProviderError("Groq returned audio without a WAV data chunk.")
+
+
 def combine_wav(clips):
     frames, params, size = [], None, 0
     try:
         for clip in clips:
-            with wave.open(io.BytesIO(clip), "rb") as audio:
+            with wave.open(io.BytesIO(bounded_wav(clip)), "rb") as audio:
                 current = (audio.getnchannels(), audio.getsampwidth(), audio.getframerate())
                 if (audio.getcomptype() != "NONE" or not 1 <= current[0] <= 2
                         or current[1] not in (1, 2, 3, 4) or not 8000 <= current[2] <= 96000
@@ -127,7 +174,7 @@ def combine_wav(clips):
 def pcm_audio(clip):
     """Decode the validated PCM WAV without loading multimedia codecs."""
     try:
-        with wave.open(io.BytesIO(clip), "rb") as audio:
+        with wave.open(io.BytesIO(bounded_wav(clip)), "rb") as audio:
             rate, channels, width = audio.getframerate(), audio.getnchannels(), audio.getsampwidth()
             pcm = audio.readframes(audio.getnframes())
         if width == 3:

@@ -38,6 +38,8 @@ Groq documents a 200-character request limit. Each readout is limited to five re
 
 **Windows** voice choices remain optional for local, offline output without a speech API call. The app discovers all installed Windows voice languages. Add more in Windows speech/language settings and reload. Microphone/speaker support depends on Windows devices and permissions. Automated tests simulate recording and cloud responses; real Groq speech still needs a check with your account.
 
+Version 0.2.4 handles Groq's unknown-length streaming WAV headers using the actual received audio bytes, while retaining size, format, truncation, and duration checks. A real Austin response has been verified through generation, decoding, and muted native playback. Account access/quota still determines whether a particular request can be fulfilled.
+
 ## Themes
 
 **Settings → Appearance** offers **Night, Daylight, Ocean, Mint, and Rose**. Changes preview immediately. Save persists the theme; Cancel restores the previous theme.

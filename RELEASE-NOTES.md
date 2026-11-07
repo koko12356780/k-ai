@@ -1,4 +1,13 @@
-# Kareem AI 0.2.3
+# Kareem AI 0.2.4
+
+- Fixed real Groq speech responses being rejected as unsupported audio.
+- Groq returns streaming WAV headers with `0xffffffff` for RIFF/data sizes. The reader now resolves those markers from the bounded bytes received, instead of interpreting them as a recording billions of frames long.
+- WAV metadata and padding are handled before reading audio. Finite truncated downloads, incomplete sample frames, invalid formats, oversized payloads, and genuinely excessive durations remain rejected.
+- Added regression coverage for the real streaming header layout, metadata, synthesis integration, finite truncation, partial frames, and genuine long recordings.
+
+Verified with a real Austin speech request: 111,356 frames at 24 kHz (4.64 seconds), successfully decoded and played through the native audio backend with volume set to zero before playback. No microphone was recorded, no audible speech was played, and no audio file was saved.
+
+## Previous release: 0.2.3
 
 - Fixed the opaque HTTP 400 error for Groq speech models that require terms acceptance.
 - The app now recognizes `model_terms_required` and explains the necessary account setup without exposing raw error bodies or echoed keys/input.
