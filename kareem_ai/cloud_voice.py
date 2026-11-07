@@ -33,6 +33,37 @@ def cloud_voice(value):
     return model, voice
 
 
+def voice_setup_url(selection):
+    from urllib.parse import urlencode
+    model, _ = cloud_voice(selection)
+    return "https://console.groq.com/playground?" + urlencode({"model": model})
+
+
+async def speech_status(response):
+    """Read bounded error metadata without exposing echoed inputs, keys, or raw bodies."""
+    if response.status_code < 400:
+        return
+    body = bytearray()
+    async for part in response.aiter_bytes():
+        if len(body) + len(part) > 8192:
+            break
+        body.extend(part)
+    code, message = "", ""
+    try:
+        import json
+        error = json.loads(body).get("error", {})
+        if isinstance(error, dict):
+            code, message = str(error.get("code", "")), str(error.get("message", ""))
+    except (ValueError, AttributeError, TypeError):
+        pass
+    if code == "model_terms_required" or "requires terms acceptance" in message.casefold():
+        raise ProviderError("Groq requires you to review and accept this speech model's terms. "
+                            "Open Settings → Voice → Groq voice setup, review them in your account, "
+                            "then try the voice again. English and Arabic models have separate terms. "
+                            "The app does not accept terms for you.")
+    check_status(response, "Groq voice")
+
+
 def speech_chunks(text):
     original = re.sub(r"\s+", " ", speech_text(text)).strip()
     remaining = original[:1000]
@@ -124,7 +155,7 @@ async def synthesize(text, key, selection, progress=lambda _: None, transport=No
                 async with client.stream("POST", "https://api.groq.com/openai/v1/audio/speech",
                     headers={"Authorization": "Bearer " + key},
                     json={"model": model, "voice": voice, "input": chunk, "response_format": "wav"}) as response:
-                    check_status(response, "Groq voice")
+                    await speech_status(response)
                     output = bytearray()
                     async for part in response.aiter_bytes():
                         output.extend(part)

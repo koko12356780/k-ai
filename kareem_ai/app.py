@@ -23,7 +23,7 @@ from .themes import NAMES, stylesheet
 from .voice import speech_text, installed_voices, voice_id
 from .voice_ui import VoiceDialog
 from .update_ui import UpdatePanel
-from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, synthesize, pcm_audio
+from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, synthesize, pcm_audio, voice_setup_url
 
 
 STYLE = '''
@@ -214,6 +214,8 @@ class Settings(QDialog):
         self.voice_count = QLabel("12 Groq cloud voices available to select. API access depends on your Groq account.")
         self.voice_count.setWordWrap(True)
         voice_layout.addWidget(self.voice_count)
+        self.setup_voice = button("Groq voice setup ↗", self.open_voice_setup)
+        voice_layout.addWidget(self.setup_voice)
         voice_layout.addWidget(button("Try this voice", lambda: parent.say(
             "Hey Kareem! I'm ready to help. How does this voice sound?",
             self.voice_choice.currentData() or "", self.rate.value() / 100, self.pitch.value() / 100)))
@@ -256,6 +258,12 @@ class Settings(QDialog):
         local = not is_cloud_voice(self.voice_choice.currentData())
         self.pitch.setEnabled(local)
         self.rate.setEnabled(local)
+        self.setup_voice.setEnabled(not local)
+
+    def open_voice_setup(self):
+        selection = self.voice_choice.currentData()
+        if is_cloud_voice(selection):
+            self.owner.approve_link(voice_setup_url(selection))
 
     def refresh(self, name):
         if not self.keys[name].text().strip():

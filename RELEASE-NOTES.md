@@ -1,4 +1,14 @@
-# Kareem AI 0.2.2
+# Kareem AI 0.2.3
+
+- Fixed the opaque HTTP 400 error for Groq speech models that require terms acceptance.
+- The app now recognizes `model_terms_required` and explains the necessary account setup without exposing raw error bodies or echoed keys/input.
+- Added Groq voice setup links in Settings → Voice and Voice mode. Each link opens the selected model's official Groq playground.
+- Users review and accept model terms themselves; the app never accepts legal agreements on their behalf.
+- English and Arabic speech models may each require their own acceptance by the Groq organization administrator.
+
+Diagnosis on this PC: one short live English speech request returned HTTP 400 with error code `model_terms_required`. No audio was recorded, played, or saved. Successful live speech generation remains pending the owner's decision about those terms.
+
+## Previous release: 0.2.2
 
 - Added 12 Groq Orpheus cloud voices, independent of Windows' installed voices.
 - English: Troy, Autumn, Diana, Hannah, Austin, and Daniel.

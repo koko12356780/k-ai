@@ -2,7 +2,7 @@
 
 Checked on Windows with Python 3.11.9, PySide6 6.12.0, httpx 0.28.1, and keyring 25.7.0.
 
-- 53 tests run: **52 passed, 1 skipped** locally for version 0.2.2.
+- 55 tests run: **54 passed, 1 skipped** locally for version 0.2.3.
 - Skipped: creating a Windows symbolic link requires a privilege unavailable to the test process. Other path escape and protected-folder checks passed.
 - Desktop startup, Settings, chat submission, streamed simulated replies, merge orchestration, persistence, contribution storage, key exclusion from saved test data, and explicit denial of a proposed write were checked using hidden native Windows widgets.
 - Welcome and simulated merge screenshots were rendered and visually reviewed. The merge screenshot is deliberately labelled as simulated.
@@ -15,6 +15,7 @@ Checked on Windows with Python 3.11.9, PySide6 6.12.0, httpx 0.28.1, and keyring
 - Read-only voice discovery on this PC found Microsoft David, Microsoft Mark, Microsoft Zira, and Microsoft Naayf (Arabic) with Windows' modern speech engine. No audio was played by that discovery check.
 - Cloud-speech checks cover all 12 voice/model pairings, request-size/count bounds, multipart-independent JSON speech requests, PCM/WAV concatenation, invalid audio, missing keys, quota errors without retries/fallback, denied consent, cancellation, stale-result suppression, and in-memory PCM playback setup. Provider responses and speaker playback are mocked in the automated suite; no real Groq voice request was made.
 - A separate native playback check sent 0.1 seconds of synthetic silence through the Logitech USB Headset using QAudioSink. Playback reached IdleState with NoError and the UI reported completion. The check used no microphone, cloud request, or audible speech. Qt audio status callbacks use no-argument slots to support the binding's legacy QAudio signal type name.
+- A live diagnostic request with the app's saved Groq credential returned `model_terms_required` (HTTP 400). The credential was not printed, and no microphone/audio playback was used. New tests verify explicit setup guidance, fixed-host setup URLs for each selected model, no automatic retries, and exclusion of echoed private data from the error message. No model terms were accepted during diagnosis.
 
 Run again from this folder:
 

@@ -6,7 +6,7 @@ import wave
 import httpx
 
 from kareem_ai.cloud_voice import (ARABIC_MODEL, CLOUD_VOICES, DEFAULT_CLOUD_VOICE,
-    cloud_voice, combine_wav, speech_chunks, synthesize)
+    cloud_voice, combine_wav, speech_chunks, synthesize, voice_setup_url)
 from kareem_ai.core import ProviderError
 from kareem_ai.voice import wav_audio
 
@@ -63,6 +63,30 @@ class CloudVoiceTests(unittest.IsolatedAsyncioTestCase):
             self.fail("No request is allowed without a key")
         with self.assertRaises(ProviderError):
             await synthesize("Hello", "", DEFAULT_CLOUD_VOICE, transport=httpx.MockTransport(handle))
+
+    async def test_required_terms_are_identified_without_echoing_private_data(self):
+        calls = []
+        def handle(request):
+            calls.append(request)
+            return httpx.Response(400, json={"error": {"code": "model_terms_required",
+                "message": "requires terms acceptance secret-key private-input"}})
+        with self.assertRaises(ProviderError) as error:
+            await synthesize("private-input", "secret-key", DEFAULT_CLOUD_VOICE,
+                             transport=httpx.MockTransport(handle))
+        message = str(error.exception)
+        self.assertIn("Groq voice setup", message)
+        self.assertIn("does not accept terms for you", message)
+        self.assertNotIn("secret-key", message)
+        self.assertNotIn("private-input", message)
+        self.assertEqual(len(calls), 1)
+
+    def test_voice_setup_links_match_selected_model(self):
+        from urllib.parse import parse_qs, urlsplit
+        for _, selection in CLOUD_VOICES:
+            url = urlsplit(voice_setup_url(selection))
+            self.assertEqual(url.scheme, "https")
+            self.assertEqual(url.netloc, "console.groq.com")
+            self.assertEqual(parse_qs(url.query)["model"], [cloud_voice(selection)[0]])
 
     def test_invalid_and_mismatched_audio_rejected(self):
         with self.assertRaises(ProviderError):

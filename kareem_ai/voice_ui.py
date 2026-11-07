@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QMessage
                               QPlainTextEdit, QPushButton, QVBoxLayout)
 
 from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio, voice_id
-from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE
+from .cloud_voice import CLOUD_VOICES, DEFAULT_CLOUD_VOICE, is_cloud_voice, voice_setup_url
 
 
 class VoiceDialog(QDialog):
@@ -62,6 +62,10 @@ class VoiceDialog(QDialog):
         cloud_note = QLabel("Groq voices generate speech in the cloud using your key and quota. Windows voices stay local.")
         cloud_note.setWordWrap(True)
         layout.addWidget(cloud_note)
+        setup = QPushButton("Groq voice setup ↗ · review model terms in your account")
+        setup.clicked.connect(lambda: owner.approve_link(voice_setup_url(self.reply_voice.currentData()))
+                              if is_cloud_voice(self.reply_voice.currentData()) else None)
+        layout.addWidget(setup)
         self.devices = QMediaDevices.audioInputs()
         self.device = QComboBox()
         self.device.addItems([d.description() for d in self.devices])
