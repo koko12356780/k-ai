@@ -102,6 +102,42 @@ class UITests(unittest.TestCase):
             execute.assert_not_called()
         self.assertFalse((Path(self.temp.name) / "denied.txt").exists())
 
+    def test_retry_with_groq_avoids_gemini_and_duplicate_messages(self):
+        self.window.keys={"Gemini":"fake-key","Groq":"fake-key"}
+        self.window.config={"Gemini":"test-gemini","Groq":"test-groq"}
+        self.window.consent={"Merge"}
+        requests=[]
+        def handler(request):
+            requests.append(request)
+            if len(requests)<=2:
+                if request.url.host=="api.groq.com":
+                    return httpx.Response(200,text='data: {"error":{"code":"tool_use_failed"}}\n\n')
+                return httpx.Response(429)
+            return httpx.Response(200,text='data: {"choices":[{"delta":{"content":"Completed reply"}}]}\n\ndata: [DONE]\n\n')
+        def finish_job():
+            deadline=time.monotonic()+5
+            while self.window.busy() and time.monotonic()<deadline:
+                QTest.qWait(20)
+            QTest.qWait(50)
+        transport=httpx.MockTransport(handler)
+        with patch("kareem_ai.app.Engine",side_effect=lambda providers,**kwargs: Engine(providers,transport,**kwargs)), \
+             patch.object(QMessageBox,"question") as consent:
+            self.window.composer.setPlainText("add to the file")
+            self.window.send()
+            finish_job()
+            self.assertIn("Gemini: quota",self.window.status.text())
+            self.assertFalse(self.window.retry_button.isHidden())
+            self.window.composer.setPlainText("draft for my next message")
+            self.window.retry_last("Groq")
+            finish_job()
+            consent.assert_not_called()
+        self.assertEqual(len(requests),3)
+        self.assertEqual(requests[-1].url.host,"api.groq.com")
+        self.assertEqual(sum(m["role"]=="user" for m in self.window.chat["messages"]),1)
+        self.assertEqual(self.window.composer.toPlainText(),"draft for my next message")
+        self.assertEqual(self.window.chat["messages"][-1]["content"],"Completed reply")
+        self.assertTrue(self.window.retry_button.isHidden())
+
     def test_theme_preview_cancel_and_save(self):
         dialog = Settings(self.window)
         for name in NAMES:

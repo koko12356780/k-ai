@@ -75,6 +75,44 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ProviderError):
             await Engine(self.providers(), httpx.MockTransport(lambda _: httpx.Response(401))).run([], "Merge")
 
+    async def test_streaming_error_reports_tool_failure_without_private_body(self):
+        data = 'data: ' + json.dumps({"error": {"code": "tool_use_failed",
+            "message": "Failed to call a function: test-secret private input",
+            "failed_generation": "private generated content"}}) + '\n\n'
+        with self.assertRaises(ProviderError) as caught:
+            await Engine(self.providers(), httpx.MockTransport(lambda _: httpx.Response(200,text=data))).run([], "Groq")
+        self.assertEqual(caught.exception.kind, "tool_generation")
+        self.assertIn("No action was executed", str(caught.exception))
+        self.assertNotIn("test-secret", str(caught.exception))
+        self.assertNotIn("private", str(caught.exception))
+
+    async def test_both_failed_providers_are_in_main_error(self):
+        def handle(request):
+            if request.url.host == "api.groq.com":
+                return httpx.Response(200,text='data: {"error":{"code":"tool_use_failed"}}\n\n')
+            return httpx.Response(429)
+        with self.assertRaises(ProviderError) as caught:
+            await Engine(self.providers(),httpx.MockTransport(handle)).run([],"Merge")
+        self.assertIn("Gemini: quota",str(caught.exception))
+        self.assertIn("Groq: the model generated an invalid tool call",str(caught.exception))
+
+    async def test_http_context_and_streaming_quota_classification(self):
+        for status,error,kind in ((413,{},"context"),(400,{"code":"context_length_exceeded"},"context"),
+                                  (200,{"code":"rate_limit_exceeded"},"quota"),
+                                  (200,{"type":"internal_server_error"},"server")):
+            def handle(_):
+                return (httpx.Response(status,json={"error":error}) if status != 200 else
+                        httpx.Response(200,text='data: '+json.dumps({"error":error})+'\n\n'))
+            with self.subTest(status=status),self.assertRaises(ProviderError) as caught:
+                await Engine(self.providers(),httpx.MockTransport(handle)).run([],"Groq")
+            self.assertEqual(caught.exception.kind,kind)
+
+    async def test_truncated_or_length_limited_reply_is_not_successful(self):
+        partial='data: {"choices":[{"delta":{"content":"```action\\n{partial"}}]}\n\n'
+        for data in (partial,partial+'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\ndata: [DONE]\n\n'):
+            with self.assertRaises(ProviderError):
+                await Engine(self.providers(),httpx.MockTransport(lambda _: httpx.Response(200,text=data))).run([],"Groq")
+
     async def test_synthesis_failure_preserves_draft(self):
         calls = []
         def handle(request):

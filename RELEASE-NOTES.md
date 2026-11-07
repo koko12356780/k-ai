@@ -1,4 +1,15 @@
-# Kareem AI 0.3.0
+# Kareem AI 0.3.1
+
+- Chat failures now distinguish quota limits, context/token allowance, invalid tool generation, structured-output failures, unavailable models, access errors, and provider outages for HTTP and streamed errors.
+- If both providers fail in Merge, the main error includes both explanations instead of only saying no draft was returned.
+- Added manual Retry last request and Retry with Groq only controls after a failed/unanswered message. Retries reuse the saved message without appending another copy, preserve any new draft in the composer, and never run automatically.
+- Groq-only retry sends no request to Gemini. An existing session's Merge consent also covers its individual providers.
+- Streams that end unexpectedly or hit an output limit are rejected as incomplete; partial file actions are not offered for approval.
+- The model instructions explicitly request the app's fenced action format instead of unavailable native API tools. Permission gates are unchanged.
+
+This update improves diagnosis and manual recovery; it cannot remove provider quotas or guarantee a provider will complete a generation. Original saved conversation content was not replayed during verification. Tests use simulated quota and streaming failures.
+
+## Previous release: 0.3.0
 
 - Removed Windows voice choices, Windows speech engine calls, local-voice discovery, and local-only speed/tone controls. All spoken replies now use Groq cloud voices.
 - Added twelve fictional characters, one for each cloud voice. Each has a distinct description, conversational style, and in-character voice preview.

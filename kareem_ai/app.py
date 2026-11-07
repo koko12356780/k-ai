@@ -465,6 +465,10 @@ class Window(QMainWindow):
         self.activity.setReadOnly(True)
         self.activity.setMaximumBlockCount(2000)
         rail.addWidget(self.activity, 1)
+        self.retry_button = button("Retry last request", lambda: self.retry_last())
+        rail.addWidget(self.retry_button)
+        self.groq_retry_button = button("Retry with Groq only", lambda: self.retry_last("Groq"))
+        rail.addWidget(self.groq_retry_button)
         self.drafts_button = button("View model contributions", self.show_drafts)
         rail.addWidget(self.drafts_button)
         self.export_button = button("Export conversation", self.export_chat)
@@ -530,13 +534,17 @@ class Window(QMainWindow):
             self.messages.addWidget(MessageCard(label, message["content"], self,
                                                  actions=message["role"] == "assistant"))
         self.scroll.verticalScrollBar().setValue(self.scroll.verticalScrollBar().maximum())
+        can_retry = bool(self.chat["messages"]) and self.chat["messages"][-1]["role"] == "user"
+        self.retry_button.setVisible(can_retry)
+        self.groq_retry_button.setVisible(can_retry)
 
     def busy(self):
         return self.worker is not None and self.worker.isRunning()
 
     def set_busy(self, value):
         for control in [self.send_button, self.new_button, self.settings_button, self.folder_button,
-                        self.mode, self.character_choice, self.chat_list, self.export_button, self.voice_button, self.speak_button, *self.action_buttons]:
+                        self.mode, self.character_choice, self.chat_list, self.export_button, self.voice_button, self.speak_button,
+                        self.retry_button, self.groq_retry_button, *self.action_buttons]:
             control.setEnabled(not value)
         self.stop_button.setEnabled(value)
 
@@ -681,11 +689,23 @@ class Window(QMainWindow):
             return
         self.review_action({"type": "open_url", "url": url})
 
-    def send(self):
+    def retry_last(self, mode=None):
+        if self.busy() or not self.chat["messages"] or self.chat["messages"][-1]["role"] != "user":
+            return
+        if mode is not None:
+            self.mode.setCurrentText(mode)
+        self.send(retry=True)
+
+    def send(self, retry=False):
         if self.busy():
             return
         self.stop_speaking()
-        text = self.composer.toPlainText().strip()
+        if retry:
+            if not self.chat["messages"] or self.chat["messages"][-1]["role"] != "user":
+                return
+            text = self.chat["messages"][-1]["content"]
+        else:
+            text = self.composer.toPlainText().strip()
         if not text:
             return
         if len(text) > 16000:
@@ -697,7 +717,7 @@ class Window(QMainWindow):
             self.settings()
             if any(not self.keys[n] or not self.config.get(n) for n in names):
                 return
-        if mode not in self.consent:
+        if mode not in self.consent and not (mode in ("Gemini", "Groq") and "Merge" in self.consent):
             explanation = ("Merge sends this conversation to both Google Gemini and Groq, then sends both drafts "
                            "to Gemini for synthesis. That is up to 3 API requests."
                            if mode == "Merge" else f"This conversation will be sent to {mode} for a reply.")
@@ -707,12 +727,14 @@ class Window(QMainWindow):
                                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                 return
             self.consent.add(mode)
-        self.chat["messages"].append({"role": "user", "content": text})
+        if not retry:
+            self.chat["messages"].append({"role": "user", "content": text})
         if len(self.chat["messages"]) == 1:
             self.chat["title"] = text[:45].replace("\n", " ")
         self.store.save_chat(self.chat)
         self.refresh_chats()
-        self.composer.clear()
+        if not retry:
+            self.composer.clear()
         self.render()
         self.partial = ""
         self.partial_card = MessageCard("WORKING · " + character_for(self.config.get("speech_voice")).name.upper(), "Thinking…", self)
@@ -762,7 +784,8 @@ class Window(QMainWindow):
         self.set_busy(True)
         self.status.setText(message)
         # Failed replies are never stored as successful answers or offered as actions.
-        self.log("Your message was saved. You can switch provider or send a follow-up when ready.")
+        self.log("Your message was saved. Retry last request sends it once without adding another copy. "
+                 "Retry with Groq only does not contact Gemini. No automatic retry is performed.")
 
     def finished(self):
         self.set_busy(False)

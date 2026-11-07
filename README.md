@@ -22,6 +22,14 @@ A Windows desktop workspace with **Gemini + Groq Merge mode**. The models run in
 
 The first use of each mode asks for consent to send conversation content to its providers. Merge also shares Groq's draft with Gemini. Keys are sent only in authorization headers to the fixed official provider endpoints.
 
+### Recovering from a failed reply
+
+The main error now explains each failed provider's category rather than only reporting a missing draft. Quota limits still require waiting for the provider's reset or choosing another available provider/model. Context/token allowance errors suggest a shorter request or a new conversation. Invalid tool-generation errors suggest a smaller edit or another chat model; no action has been executed.
+
+Use **Retry last request** to explicitly send the existing unanswered message in the selected mode. **Retry with Groq only** selects Groq and sends that same request only to Groq, which is useful when Gemini's quota is exhausted. A retry does not append a duplicate user message or clear a new draft you have typed. There are no automatic retries and no automatic quota bypasses. An existing session's Merge permission covers its individual providers; otherwise the normal cloud-processing consent still appears.
+
+An incomplete or output-limited response is not treated as a completed answer, and its partial file actions are not offered for approval. Your original message and chat history remain saved.
+
 ## Voice mode
 
 Click **Voice**, choose your microphone, then **Record**. Recording starts only after approval. Click **Stop recording**, then **Transcribe with Groq** and approve the audio upload. Review/edit the transcript and click **Use transcript in message box**. Click **Send** when ready. This is push-to-talk, not a continuous live call.
