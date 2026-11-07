@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 import httpx
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QPushButton
 
 from kareem_ai.app import Settings, STYLE, Window
 from kareem_ai.core import Engine
@@ -188,6 +188,44 @@ class UITests(unittest.TestCase):
             download.assert_not_called()
         self.assertFalse(updates.running())
         dialog.reject()
+
+    def test_voice_picker_preview_is_local_and_choice_saves(self):
+        from unittest.mock import Mock
+        from PySide6.QtCore import QLocale
+        voice = Mock()
+        voice.name.return_value = "Test voice"
+        voice.locale.return_value = QLocale("en_US")
+        with patch.object(self.window, "voice_options", return_value=[voice]), \
+             patch.object(self.window, "say") as say, \
+             patch("kareem_ai.voice_ui.QMediaDevices.audioInputs", return_value=[]):
+            dialog = VoiceDialog(self.window, Worker)
+            dialog.reply_voice.setCurrentIndex(1)
+            dialog.preview_voice.click()
+            self.assertEqual(say.call_args.args[1], "en_US|Test voice")
+            self.assertNotIn("speech_voice", self.window.store.config())
+            dialog.save_voice()
+            self.assertEqual(self.window.store.config()["speech_voice"], "en_US|Test voice")
+            dialog.reject()
+
+    def test_settings_auto_load_voices_and_preview_without_saving(self):
+        from unittest.mock import Mock
+        from PySide6.QtCore import QLocale
+        voice = Mock()
+        voice.name.return_value = "Test Arabic voice"
+        voice.locale.return_value = QLocale("ar_SA")
+        with patch.object(self.window, "voice_options", return_value=[voice]), \
+             patch.object(self.window, "say") as say:
+            dialog = Settings(self.window)
+            dialog.tabs.setCurrentIndex(2)
+            self.assertEqual(dialog.voice_choice.count(), 2)
+            dialog.voice_choice.setCurrentIndex(1)
+            dialog.rate.setValue(20)
+            dialog.pitch.setValue(-15)
+            sample = next(b for b in dialog.findChildren(QPushButton) if b.text() == "Try this voice")
+            sample.click()
+            self.assertEqual(say.call_args.args[1:], ("ar_SA|Test Arabic voice", .2, -.15))
+            self.assertNotIn("speech_voice", self.window.store.config())
+            dialog.reject()
 
 
 if __name__ == "__main__":

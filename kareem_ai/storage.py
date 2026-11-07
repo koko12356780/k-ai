@@ -38,7 +38,7 @@ class Store:
         return read_json(self.root / "settings.json", {"Gemini": "", "Groq": ""})
 
     def save_config(self, config):
-        allowed = ("Gemini", "Groq", "theme", "read_replies", "speech_rate", "speech_voice", "stt_model")
+        allowed = ("Gemini", "Groq", "theme", "read_replies", "speech_rate", "speech_pitch", "speech_voice", "stt_model")
         write_json(self.root / "settings.json", {k: config[k] for k in allowed if k in config})
 
     def chats(self):

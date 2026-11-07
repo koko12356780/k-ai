@@ -7,7 +7,7 @@ from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QMessageBox,
                               QPlainTextEdit, QPushButton, QVBoxLayout)
 
-from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio
+from .voice import MAX_AUDIO_BYTES, transcribe, wav_audio, voice_id
 
 
 class VoiceDialog(QDialog):
@@ -32,6 +32,30 @@ class VoiceDialog(QDialog):
                       "Audio stays in memory and is discarded when you close this window. Maximum: 60 seconds.")
         note.setWordWrap(True)
         layout.addWidget(note)
+        voice_row = QHBoxLayout()
+        voice_row.addWidget(QLabel("Reply voice"))
+        self.reply_voice = QComboBox()
+        self.reply_voice.addItem("Default Windows voice", "")
+        for voice in owner.voice_options():
+            self.reply_voice.addItem(voice.name() + " · " + voice.locale().name(), voice_id(voice))
+        saved = owner.config.get("speech_voice", "")
+        selected = self.reply_voice.findData(saved)
+        if selected < 0:
+            selected = next((i for i in range(self.reply_voice.count())
+                             if self.reply_voice.itemData(i).endswith("|" + saved)), -1)
+        if selected < 0 and saved:
+            self.reply_voice.addItem("Unavailable saved voice · " + saved, saved)
+            selected = self.reply_voice.count() - 1
+        self.reply_voice.setCurrentIndex(max(0, selected))
+        voice_row.addWidget(self.reply_voice, 1)
+        self.preview_voice = QPushButton("Try this voice")
+        self.preview_voice.clicked.connect(lambda: owner.say(
+            "Hey Kareem! I'm ready to help. How does this voice sound?", self.reply_voice.currentData() or ""))
+        voice_row.addWidget(self.preview_voice)
+        save_voice = QPushButton("Save voice")
+        save_voice.clicked.connect(self.save_voice)
+        voice_row.addWidget(save_voice)
+        layout.addLayout(voice_row)
         self.devices = QMediaDevices.audioInputs()
         self.device = QComboBox()
         self.device.addItems([d.description() for d in self.devices])
@@ -75,6 +99,11 @@ class VoiceDialog(QDialog):
     def running(self):
         return self.worker is not None and self.worker.isRunning()
 
+    def save_voice(self):
+        self.owner.config["speech_voice"] = self.reply_voice.currentData() or ""
+        self.owner.store.save_config(self.owner.config)
+        self.status.setText("Reply voice saved. Use Try this voice to hear it.")
+
     def start_recording(self):
         if not self.devices or self.running():
             return
@@ -108,6 +137,7 @@ class VoiceDialog(QDialog):
             return
         self.started_at = time.monotonic()
         self.record.setEnabled(False)
+        self.preview_voice.setEnabled(False)
         self.device.setEnabled(False)
         self.stop.setEnabled(True)
         self.upload.setEnabled(False)
@@ -147,6 +177,7 @@ class VoiceDialog(QDialog):
                 self.audio = b""
                 self.status.setText(str(exc))
         self.record.setEnabled(bool(self.devices))
+        self.preview_voice.setEnabled(True)
         self.device.setEnabled(True)
         self.stop.setEnabled(False)
         self.upload.setEnabled(bool(self.audio))
@@ -204,5 +235,6 @@ class VoiceDialog(QDialog):
             self.status.setText("Cancelling transcription… Close again when it finishes.")
             return
         self.stop_recording()
+        self.owner.stop_speaking()
         self.audio = b""
         super().reject()

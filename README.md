@@ -28,7 +28,7 @@ Click **Voice**, choose your microphone, then **Record**. Recording starts only 
 
 Recordings stay in memory and are discarded when Voice closes. They are capped at 60 seconds and 12 MB. Groq's speech-to-text quota and data policies apply. Speech input uses `whisper-large-v3-turbo` by default; Settings → Voice also offers `whisper-large-v3`.
 
-Click **Read aloud** for the latest reply or enable automatic spoken replies in **Settings → Voice**. **Mute** stops playback. Speech uses installed Windows voices locally; it does not make an additional AI API request. You can load installed voices and adjust speed. Microphone and speaker support depends on Windows devices, permissions, and installed voices. The automated voice tests simulate a microphone and API; live audio still needs testing on your hardware.
+Click **Read aloud** for the latest reply or enable automatic spoken replies in **Settings → Voice**. **Mute** stops playback. Speech uses installed Windows voices locally; it does not make an additional AI API request. **Settings → Voice** loads voices across all installed Windows languages and lets you preview each voice, adjust speed and deeper/brighter tone, then Save. Voice mode itself also has a reply-voice picker, Try this voice, and Save voice. Install more voices through Windows speech/language settings and reload for more choices. Microphone and speaker support depends on Windows devices, permissions, and installed voices. The automated voice tests simulate a microphone and API; live audio still needs testing on your hardware.
 
 ## Themes
 

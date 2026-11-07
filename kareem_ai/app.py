@@ -20,7 +20,7 @@ from .core import Answer, Engine, Provider, ProviderError, cancellable, discover
 from .storage import Store, get_key, new_chat, set_key
 from .tools import execute, prepare, proposals
 from .themes import NAMES, stylesheet
-from .voice import speech_text
+from .voice import speech_text, installed_voices, voice_id
 from .voice_ui import VoiceDialog
 from .update_ui import UpdatePanel
 
@@ -188,6 +188,11 @@ class Settings(QDialog):
         self.rate.setRange(-50, 50)
         self.rate.setValue(int(float(parent.config.get("speech_rate", 0)) * 100))
         voice_layout.addWidget(self.rate)
+        voice_layout.addWidget(QLabel("Voice tone · deeper ← → brighter"))
+        self.pitch = QSlider(Qt.Orientation.Horizontal)
+        self.pitch.setRange(-50, 50)
+        self.pitch.setValue(int(float(parent.config.get("speech_pitch", 0)) * 100))
+        voice_layout.addWidget(self.pitch)
         self.voice_choice = QComboBox()
         self.voice_choice.addItem("Default Windows voice", "")
         self.voice_choice.setCurrentIndex(0)
@@ -196,27 +201,43 @@ class Settings(QDialog):
             self.voice_choice.addItem(self.saved_voice, self.saved_voice)
             self.voice_choice.setCurrentIndex(1)
         voice_layout.addWidget(self.voice_choice)
-        voice_layout.addWidget(button("Load installed voices", self.load_voices))
+        voice_layout.addWidget(button("Reload installed voices", self.load_voices))
+        self.voice_count = QLabel("Open this tab to load your Windows voices. No cloud API is used for speaking.")
+        self.voice_count.setWordWrap(True)
+        voice_layout.addWidget(self.voice_count)
+        voice_layout.addWidget(button("Try this voice", lambda: parent.say(
+            "Hey Kareem! I'm ready to help. How does this voice sound?",
+            self.voice_choice.currentData() or "", self.rate.value() / 100, self.pitch.value() / 100)))
         voice_layout.addWidget(button("Stop speaking", parent.stop_speaking))
+        more = QLabel("Want more choices? Add voices in Windows speech/language settings, then reload here.")
+        more.setWordWrap(True)
+        voice_layout.addWidget(more)
         voice_layout.addStretch()
         self.updates = UpdatePanel(parent, Worker)
         self.tabs.addTab(self.updates, "Updates")
+        self.tabs.currentChanged.connect(lambda index: self.load_voices() if index == 2 else None)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.save)
         self.buttons.rejected.connect(self.reject)
         outer.addWidget(self.buttons)
 
     def load_voices(self):
-        speaker = self.owner.ensure_speaker()
-        if speaker is None:
-            return
         current = self.voice_choice.currentData()
         self.voice_choice.clear()
         self.voice_choice.addItem("Default Windows voice", "")
-        for voice in speaker.availableVoices():
-            self.voice_choice.addItem(voice.name(), voice.name())
+        voices = self.owner.voice_options()
+        for voice in voices:
+            self.voice_choice.addItem(voice.name() + " · " + voice.locale().name(), voice_id(voice))
         selected = self.voice_choice.findData(current)
+        if selected < 0 and current:
+            selected = next((i for i in range(self.voice_choice.count())
+                             if self.voice_choice.itemData(i).endswith("|" + current)), -1)
+        if selected < 0 and current:
+            self.voice_choice.addItem("Unavailable saved voice · " + current, current)
+            selected = self.voice_choice.count() - 1
         self.voice_choice.setCurrentIndex(max(0, selected))
+        self.voice_count.setText(f"{len(voices)} installed voice(s) found across your Windows languages." if voices else
+                                "No Windows speech voices available. Add a Windows voice, then reload.")
 
     def refresh(self, name):
         if not self.keys[name].text().strip():
@@ -275,6 +296,7 @@ class Settings(QDialog):
         self.owner.config = {**self.owner.config, **{name: self.models[name].currentText().strip() for name in values},
             "theme": self.theme.currentText(), "read_replies": self.read_replies.isChecked(),
             "speech_rate": self.rate.value() / 100, "speech_voice": self.voice_choice.currentData() or "",
+            "speech_pitch": self.pitch.value() / 100,
             "stt_model": self.stt_model.currentText()}
         self.owner.store.save_config(self.owner.config)
         self.owner.apply_theme(self.owner.config["theme"])
@@ -286,6 +308,7 @@ class Settings(QDialog):
             self.updates.status.setText("Wait for the current operation to finish before closing Settings.")
             return
         self.owner.apply_theme(self.original_theme)
+        self.owner.stop_speaking()
         super().reject()
 
 
@@ -515,30 +538,40 @@ class Window(QMainWindow):
     def apply_theme(self, name):
         QApplication.instance().setStyleSheet(stylesheet(STYLE, name))
 
-    def ensure_speaker(self):
+    def ensure_speaker(self, silent=False):
         if self.speaker is None:
             from PySide6.QtTextToSpeech import QTextToSpeech
-            if not QTextToSpeech.availableEngines():
-                QMessageBox.information(self, "Windows voices unavailable", "No speech engine was found. Install a Windows voice in Windows language settings.")
+            engines = [name for name in QTextToSpeech.availableEngines() if name != "mock"]
+            if not engines:
+                if not silent:
+                    QMessageBox.information(self, "Windows voices unavailable", "No speech engine was found. Install a Windows voice in Windows language settings.")
                 return None
-            self.speaker = QTextToSpeech(self)
+            engine = "winrt" if "winrt" in engines else ("sapi" if "sapi" in engines else engines[0])
+            self.speaker = QTextToSpeech(engine, self)
+            self.default_voice = self.speaker.voice()
         return self.speaker
+
+    def voice_options(self):
+        speaker = self.ensure_speaker(silent=True)
+        return installed_voices(speaker) if speaker is not None else []
 
     def stop_speaking(self):
         if self.speaker is not None:
             self.speaker.stop()
 
-    def say(self, text):
+    def say(self, text, voice_name=None, rate=None, pitch=None):
         speaker = self.ensure_speaker()
         if speaker is None:
             return
         speaker.stop()
-        voice_name = self.config.get("speech_voice", "")
-        voices = speaker.availableVoices()
-        voice = next((v for v in voices if v.name() == voice_name), None)
-        if voice is not None:
-            speaker.setVoice(voice)
-        speaker.setRate(float(self.config.get("speech_rate", 0)))
+        voice_name = self.config.get("speech_voice", "") if voice_name is None else voice_name
+        voices = self.voice_options()
+        voice = next((v for v in voices if voice_id(v) == voice_name or v.name() == voice_name), None)
+        voice = voice or self.default_voice
+        speaker.setLocale(voice.locale())
+        speaker.setVoice(voice)
+        speaker.setRate(float(self.config.get("speech_rate", 0)) if rate is None else rate)
+        speaker.setPitch(float(self.config.get("speech_pitch", 0)) if pitch is None else pitch)
         speaker.say(speech_text(text))
 
     def read_latest(self):

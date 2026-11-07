@@ -13,7 +13,7 @@ from bootstrap import installed_root
 from kareem_ai.core import ProviderError
 from kareem_ai.updates import (REPOSITORY, Release, activate, download_release, install_bundle,
                               latest_release, version_tuple)
-from kareem_ai.voice import speech_text, transcribe, wav_audio
+from kareem_ai.voice import installed_voices, speech_text, transcribe, wav_audio, voice_id
 
 
 def bundle(version="0.3.0", extra=None):
@@ -35,6 +35,22 @@ def release_for(payload, version="0.3.0"):
 
 
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_all_voice_locales_enumerated_and_original_selection_restored(self):
+        from unittest.mock import Mock
+        en, ar = Mock(), Mock()
+        en.name.return_value, ar.name.return_value = "en_US", "ar_SA"
+        david, arabic = Mock(), Mock()
+        david.name.return_value, arabic.name.return_value = "David", "Naayf"
+        david.locale.return_value, arabic.locale.return_value = en, ar
+        speaker = Mock()
+        speaker.locale.return_value, speaker.voice.return_value = en, david
+        speaker.availableLocales.return_value = [en, ar]
+        speaker.availableVoices.side_effect = [[david], [arabic]]
+        voices = installed_voices(speaker)
+        self.assertEqual({voice_id(v) for v in voices}, {"en_US|David", "ar_SA|Naayf"})
+        self.assertEqual(speaker.setLocale.call_args.args, (en,))
+        self.assertEqual(speaker.setVoice.call_args.args, (david,))
+
     def test_audio_is_valid_wav(self):
         audio = wav_audio(b"\x00\x00" * 1600, 16000, 1)
         with wave.open(io.BytesIO(audio)) as f:

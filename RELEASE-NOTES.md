@@ -1,4 +1,15 @@
-# Kareem AI 0.2.0
+# Kareem AI 0.2.1
+
+- Merge now answers the actual message naturally; it is instructed to avoid narrating draft comparisons unless asked. Model contributions remain inspectable separately.
+- Added a reply-voice picker inside Voice mode, with Try this voice and Save voice controls.
+- Settings → Voice automatically loads installed voices across all Windows languages, rather than showing only the current language.
+- Added local voice previews and a deeper/brighter tone slider alongside speech speed.
+- Returning to the default voice resets the previously selected voice. Existing saved voice names remain supported.
+- Voice previews do not send data to an AI API or start the microphone. No additional speech service or subscription is required.
+
+Voice choices depend on which voices are installed in Windows. Add more through Windows speech/language settings, then reload the list. AI reply style remains model-dependent; the updated instructions do not guarantee identical wording on every response.
+
+## Previous release: 0.2.0
 
 - Added push-to-talk voice input: choose a microphone, approve recording, stop, transcribe with Groq, review, then send.
 - Added Windows spoken replies, Read aloud, Mute, automatic readout preference, installed voice selection, and speech speed.

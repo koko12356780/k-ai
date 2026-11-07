@@ -53,6 +53,24 @@ class CoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("test-secret", " ".join(logs))
         self.assertIn("No retry", " ".join(logs))
 
+    async def test_merge_keeps_actual_request_and_natural_reply_rules(self):
+        calls = []
+        def handle(request):
+            body = json.loads(request.content)
+            calls.append(body)
+            if len(calls) < 3:
+                return stream("Yo Kareem! What's up?")
+            self.assertEqual(body["messages"][0]["role"], "system")
+            self.assertIn("Do not narrate the merging process", body["messages"][0]["content"])
+            self.assertIn("unless the user explicitly asks", body["messages"][0]["content"])
+            self.assertEqual(body["messages"][1], {"role": "user", "content": "yo"})
+            self.assertTrue(body["messages"][-1]["content"].startswith("REFERENCE DRAFTS ONLY"))
+            return stream("Yo Kareem! What's up?")
+        answer = await Engine(self.providers(), httpx.MockTransport(handle)).run(
+            [{"role": "user", "content": "yo"}], "Merge")
+        self.assertEqual(answer.text, "Yo Kareem! What's up?")
+        self.assertEqual(len(answer.drafts), 2)
+
     async def test_both_fail(self):
         with self.assertRaises(ProviderError):
             await Engine(self.providers(), httpx.MockTransport(lambda _: httpx.Response(401))).run([], "Merge")
