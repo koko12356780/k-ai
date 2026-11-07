@@ -113,7 +113,7 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
             payload = bundle()
             target = install_bundle(payload, release_for(payload), root)
             self.assertFalse((root / "current.json").exists())
-            self.assertEqual(target, root / "releases" / "0.3.0")
+            self.assertEqual(target, (root / "releases" / "0.3.0").resolve())
             activate(target, root)
             self.assertEqual(installed_root(Path("source"), root), target)
             self.assertEqual((root / "chats" / "chat.json").read_text(), "history")
